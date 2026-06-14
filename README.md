@@ -63,6 +63,7 @@ uv run python -m src.data.export_eval
 ## Documentación del Proyecto
 
 Para más detalles teóricos y de diseño, consulte:
+* [adr_data_pipeline.md](docs/codigo/adr_data_pipeline.md): Architecture Decision Record (ADR) con las decisiones del pipeline.
 * [data_pipeline.md](docs/codigo/data_pipeline.md): Especificaciones técnicas de la limpieza, hashes y formato SFT.
 * [data_normalization.md](docs/codigo/data_normalization.md): Proceso de extracción inicial de datasets crudos.
 * [destilacion_creatividad_composicional.md](docs/informe/destilacion_creatividad_composicional.md): Paper de diseño del proyecto de investigación.
