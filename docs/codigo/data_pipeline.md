@@ -1,12 +1,12 @@
-# Data Cleaning & Splitting Pipeline
+# Data Cleaning, Splitting & Evaluation Pipeline
 
-This document explains the deduplication, casing resolution, conflict flagging, deterministic splitting, and conversational SFT export stages of the dataset pipeline.
+This document explains the deduplication, casing resolution, conflict flagging, stable hashing splits, and the SFT/evaluation export stages of the dataset pipeline.
 
 ---
 
 ## Pipeline Overview
 
-The data pipeline processes raw normalized observations to produce deduplicated, split-versioned canonical recipes, and outputs conversational formats suitable for Supervised Fine-Tuning (SFT).
+The data pipeline processes raw normalized observations to produce deduplicated, split-versioned canonical recipes, and outputs conversational formats suitable for Supervised Fine-Tuning (SFT) as well as structured pairs for baseline evaluation.
 
 ```
 [recipe_observations_v0.jsonl] (Bronze)
@@ -14,10 +14,10 @@ The data pipeline processes raw normalized observations to produce deduplicated,
       src/data/clean.py
               ↓
   [recipe_canonical_v0.jsonl] (Silver)
-              ↓
-    src/data/export_sft.py
-              ↓
-[sft_train/dev/test.jsonl] (Gold)
+       ↙                    ↘
+src/data/export_sft.py    src/data/export_eval.py
+     ↓                            ↓
+[sft_{var}_{split}.jsonl]   [eval_{split}_{size}.jsonl]
 ```
 
 ---
@@ -33,8 +33,12 @@ Raw inputs contain inconsistent casings (e.g. `steam`, `Steam`, `STEAM`).
 ### 2. Emoji Mode Selection
 Similarly, if different sources provide different emojis for the same concept, we resolve the concept's emoji to the most frequent non-generic emoji (ignoring fallback `⚪` where possible).
 
-### 3. Duplicate Aggregation
-Identical recipes `(input_a, input_b, output)` are grouped into a single canonical recipe. We compute the `observation_count` (total occurrences) and track the list of `sources` (e.g. `["ericlewis_train", "expitau"]`).
+### 3. Stable Hash IDs (`pair_id` and `recipe_id`)
+To prevent string collision errors when concepts contain special characters (like `+` or `=>` e.g. `C++`), the pipeline generates unique cryptographic hash keys:
+* `pair_id`: `sha256(json_array([input_a_norm, input_b_norm]))`
+* `recipe_id`: `sha256(json_array([input_a_norm, input_b_norm, output_norm]))`
+
+These IDs are used for all internal splitting and joining operations, while keeping raw display keys like `pair_key` (`fire+water`) for debugging and inspection.
 
 ### 4. Conflict Flagging
 * **Logic**: We group combinations by `(input_a, input_b)` to find pairs that produce multiple outputs (e.g., `Fire + Water` producing both `Steam` and `Mist`).
@@ -45,7 +49,7 @@ Identical recipes `(input_a, input_b, output)` are grouped into a single canonic
   * **SFT Target Decisions**: The presence of `is_conflicting_pair` allows downstream trainers to decide whether to train the student on all outputs (for diversity) or filter to the most frequent output (to avoid gradient conflicts during SFT).
 
 ### 5. Quality Status Labeling
-Each recipe is tagged with a `status`:
+Each recipe is tagged with a status:
 * `"keep"`: Standard deduplicated recipe.
 * `"keep_conflicting"`: Legitimate creative alternative output.
 * `"review_identity"`: Output equals one of the inputs (e.g., `Water + Fire = Water`), flagged for manual review or future pruning.
@@ -65,16 +69,28 @@ To ensure a robust evaluation of **compositional creativity**, we perform a dete
 
 ---
 
-## Conversational SFT Export Format
+## Dataset Variants & Outputs
 
-The export script (`src/data/export_sft.py`) writes conversational training items for splits to `datasets/processed/sft_{split}.jsonl` using a standard `messages` structure:
+We export SFT variants and dedicated evaluation files into `datasets/processed/`.
 
+### 1. Conversational SFT Exporter (`export_sft.py`)
+Generates training files in conversational `messages` format:
+* **`sft_clean`**: Strict, high-confidence recipes. Excludes conflicts and identity copies (`status == "keep" and is_conflicting_pair == false`).
+  * `train`: `4,819,470` recipes
+  * `dev`: `602,888` recipes
+  * `test`: `602,623` recipes
+* **`sft_all`**: All valid recipes (`status in ["keep", "keep_conflicting", "review_identity"]`).
+  * `train`: `5,237,309` recipes
+  * `dev`: `654,881` recipes
+  * `test`: `654,873` recipes
+
+*Prompt Format:*
 ```json
 {
   "messages": [
     {
       "role": "user",
-      "content": "Combine the concepts: Fire + Water. Return only the resulting concept."
+      "content": "Given two concepts, combine them into one resulting concept.\n\nConcept A: Fire\nConcept B: Water\n\nReturn only the resulting concept."
     },
     {
       "role": "assistant",
@@ -82,34 +98,58 @@ The export script (`src/data/export_sft.py`) writes conversational training item
     }
   ],
   "metadata": {
+    "pair_id": "...",
+    "recipe_id": "...",
     "pair_key": "fire+water",
     "recipe_key": "fire+water=>steam",
     "source_count": 2,
-    "is_conflicting_pair": true,
+    "observation_count": 4,
+    "pair_num_outputs": 1,
+    "is_conflicting_pair": false,
+    "status": "keep",
     "split": "train"
   }
 }
 ```
 
+### 2. Structured Evaluation Exporter (`export_eval.py`)
+Generates structured pair-level evaluation sets. It uses a **reservoir sampling** algorithm to scan the 3.5 GB dataset in two streaming passes using **less than 10 MB of RAM**:
+* **`eval_dev_1k.jsonl`**: 1,000 clean dev pairs.
+* **`eval_test_1k.jsonl`**: 1,000 clean test pairs.
+* **`eval_test_identity_500.jsonl`**: 500 test identity pairs (output equals input).
+* **`eval_test_conflicting_500.jsonl`**: 500 test conflicting pairs (pairs with multiple known correct outputs).
+
+*Evaluation Record Schema:*
+```json
+{
+  "pair_id": "8a38a7c2921a8d0526be...",
+  "pair_key": "fire+water",
+  "input_a": "Fire",
+  "input_b": "Water",
+  "known_outputs": ["Mist", "Steam"],
+  "canonical_output": "Steam",
+  "status": "keep",
+  "split": "test"
+}
+```
+*During scoring, a student prediction is evaluated against the entire list of `known_outputs` to reward legitimate alternative outputs.*
+
 ---
 
-## Validation and Split Metrics
+## Running the Pipeline
 
-Executing the pipeline outputs the following metrics:
+To re-run the pipeline or export datasets:
 
-* **Canonical Recipes**: `6,547,063`
-* **Unique Input Pairs**: `6,541,348`
-* **Conflicting Input Pairs**: `5,007` (yielding `10,486` alternative recipes)
-* **Identity Review Recipes**: `511,596`
-* **Split Counts**:
-  * **Train**: `5,237,309` (80.0%)
-  * **Dev**: `654,881` (10.0%)
-  * **Test**: `654,873` (10.0%)
+```bash
+# Step 1: Normalize observations
+uv run python -m src.data.normalize
 
----
+# Step 2: Clean, canonicalize and assign splits
+uv run python -m src.data.clean
 
-## Future Integration with LLM Teacher Augmentation
+# Step 3: Export SFT datasets
+uv run python -m src.data.export_sft
 
-In the next phase of the project, teacher models (e.g. Gemini) will generate **rationales**, **negatives**, and **preference scores** to enable M3 (SFT + Rationale) and M4 (DPO) training. 
-
-* **Joinable Augmentation Table**: These teacher-enriched records will be stored in `datasets/processed/teacher_enriched_v0.jsonl` and joined with the canonical split datasets using `recipe_key` (or `pair_key`). This prevents bloating the base canonical table and avoids training leakage.
+# Step 4: Export structured evaluation datasets
+uv run python -m src.data.export_eval
+```

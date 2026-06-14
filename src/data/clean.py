@@ -3,6 +3,7 @@ import json
 import hashlib
 from collections import defaultdict
 from typing import Tuple, Set, Dict
+from src.data.schemas import stable_id
 
 def stable_bucket(value: Tuple[str, str], modulo: int = 10_000) -> int:
     str_val = f"{value[0]}+{value[1]}"
@@ -192,7 +193,12 @@ def main():
             metrics["num_canonical_recipes"] += 1
             metrics["split_counts"][split] += 1
 
+            pair_id = stable_id([pair_key[0], pair_key[1]])
+            recipe_id = stable_id([pair_key[0], pair_key[1], key_out])
+
             canonical_recipe = {
+                "pair_id": pair_id,
+                "recipe_id": recipe_id,
                 "pair_key": f"{pair_key[0]}+{pair_key[1]}",
                 "recipe_key": f"{pair_key[0]}+{pair_key[1]}=>{key_out}",
                 "input_a": display_a,
