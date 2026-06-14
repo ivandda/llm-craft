@@ -5,9 +5,10 @@ from langchain_google_vertexai import ChatVertexAI
 from deepagents import create_deep_agent
 
 def main():
-    # 1. Load environment variables from the .env file
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    env_path = os.path.join(base_dir, ".env")
+    # 1. Load environment variables from the .env file at the repository root
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    repo_root = os.path.abspath(os.path.join(current_dir, "..", ".."))
+    env_path = os.path.join(repo_root, ".env")
     
     if os.path.exists(env_path):
         load_dotenv(env_path)
@@ -15,11 +16,11 @@ def main():
         print(f"Warning: .env file not found at {env_path}")
         
     # Configure the GOOGLE_APPLICATION_CREDENTIALS environment variable
-    # to be an absolute path so Google's client libraries can find it.
+    # to be an absolute path relative to the repo root so Google's client libraries can find it.
     creds_rel_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
     if creds_rel_path:
         os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = os.path.abspath(
-            os.path.join(base_dir, creds_rel_path)
+            os.path.join(repo_root, creds_rel_path)
         )
         
     project_id = os.environ.get("GOOGLE_CLOUD_PROJECT")
