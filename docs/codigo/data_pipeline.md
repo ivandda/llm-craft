@@ -26,9 +26,8 @@ src/data/export_sft.py    src/data/export_eval.py
 
 The cleaning stage (`src/data/clean.py`) uses a memory-efficient **two-pass approach** with standard libraries to process the 6.7M observations:
 
-### 1. Casing Mode Resolution
-Raw inputs contain inconsistent casings (e.g. `steam`, `Steam`, `STEAM`).
-* **Logic**: In Pass 1, we count occurrences of each capitalization form for every unique concept. In Pass 2, we resolve each concept to its **most frequent casing (mode)**. This ensures clean, uniform capitalization (e.g., `Fire`, `Steam`, `Water`) in SFT prompts.
+### 1. Casing and Lowercase Normalization
+To simplify student model learning, all elements, inputs, and outputs are normalized to **lowercase** throughout the cleaning and SFT/evaluation export stages. This prevents vocabulary fragmentation (e.g. treating `steam`, `Steam`, and `STEAM` as separate tokens) and allows the student model to focus entirely on compositional semantics. Raw display casing is preserved in the Bronze layers for provenance tracking but collapsed in the Silver/Gold layers.
 
 ### 2. Emoji Mode Selection
 Similarly, if different sources provide different emojis for the same concept, we resolve the concept's emoji to the most frequent non-generic emoji (ignoring fallback `⚪` where possible).
@@ -76,13 +75,13 @@ We export SFT variants and dedicated evaluation files into `datasets/processed/`
 ### 1. Conversational SFT Exporter (`export_sft.py`)
 Generates training files in conversational `messages` format:
 * **`sft_clean`**: Strict, high-confidence recipes. Excludes conflicts and identity copies (`status == "keep" and is_conflicting_pair == false`).
-  * `train`: `4,819,470` recipes
-  * `dev`: `602,888` recipes
-  * `test`: `602,623` recipes
+  * `train`: `4,823,461` recipes
+  * `dev`: `603,384` recipes
+  * `test`: `603,103` recipes
 * **`sft_all`**: All valid recipes (`status in ["keep", "keep_conflicting", "review_identity"]`).
-  * `train`: `5,237,309` recipes
-  * `dev`: `654,881` recipes
-  * `test`: `654,873` recipes
+  * `train`: `4,827,910` recipes
+  * `dev`: `603,929` recipes
+  * `test`: `603,628` recipes
 
 *Prompt Format:*
 ```json
@@ -117,7 +116,7 @@ Generates structured pair-level evaluation sets. It uses a **reservoir sampling*
 * **`eval_dev_1k.jsonl`**: 1,000 clean dev pairs.
 * **`eval_test_1k.jsonl`**: 1,000 clean test pairs.
 * **`eval_test_identity_500.jsonl`**: 500 test identity pairs (output equals input).
-* **`eval_test_conflicting_500.jsonl`**: 500 test conflicting pairs (pairs with multiple known correct outputs).
+* **`eval_test_conflicting_500.jsonl`**: 480 test conflicting pairs (pairs with multiple known correct outputs; 480 represents the total number of conflicts in the test split).
 
 *Evaluation Record Schema:*
 ```json
@@ -138,7 +137,13 @@ Generates structured pair-level evaluation sets. It uses a **reservoir sampling*
 
 ## Running the Pipeline
 
-To re-run the pipeline or export datasets:
+To re-run the pipeline or export datasets, you can run the master orchestrator script which executes all steps sequentially:
+
+```bash
+uv run python -m src.data.run_pipeline
+```
+
+Alternatively, you can run individual steps:
 
 ```bash
 # Step 1: Normalize observations

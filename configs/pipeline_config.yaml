@@ -1,0 +1,33 @@
+# Configuración del Pipeline de llm-craft
+
+# Paso 1: Normalización (normalize.py)
+normalization:
+  raw_dir: "datasets/raw"
+  processed_dir: "datasets/processed"
+
+# Paso 2: Limpieza y Splits (clean.py)
+cleaning:
+  # Normalizar todo a minúsculas
+  lowercase_all: true
+  # Proporciones de los conjuntos
+  split_ratio:
+    train: 0.80
+    dev: 0.10
+    test: 0.10
+
+# Paso 3: Exportación para SFT (export_sft.py)
+sft_export:
+  # Si es True, el dataset de entrenamiento no contendrá recetas conflictivas (alternativas múltiples)
+  exclude_conflicts: false
+  # Si es True, excluye copias triviales donde el output es idéntico a una de las entradas
+  exclude_identities: true
+  # Plantilla de prompt conversacional
+  prompt_template: "Given two concepts, combine them into one resulting concept.\n\nConcept A: {input_a}\nConcept B: {input_b}\n\nReturn only the resulting concept."
+
+# Paso 4: Exportación de Sets de Evaluación (export_eval.py)
+evaluation_export:
+  sizes:
+    dev_keep: 1000
+    test_keep: 1000
+    test_identity: 500
+    test_conflicting: 500

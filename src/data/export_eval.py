@@ -1,11 +1,12 @@
 import os
 import json
+import yaml
 import random
-from collections import defaultdict
 from typing import Dict, List, Any
 
 def main():
     base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    config_file = os.path.join(base_dir, "configs", "pipeline_config.yaml")
     input_file = os.path.join(base_dir, "datasets", "processed", "recipe_canonical_v0.jsonl")
     processed_dir = os.path.join(base_dir, "datasets", "processed")
 
@@ -13,22 +14,41 @@ def main():
         print(f"Error: Canonical file not found at {input_file}. Run clean.py first.")
         return
 
+    # Load configuration
+    if os.path.exists(config_file):
+        with open(config_file, "r", encoding="utf-8") as f:
+            config = yaml.safe_load(f)
+    else:
+        config = {
+            "evaluation_export": {
+                "sizes": {
+                    "dev_keep": 1000,
+                    "test_keep": 1000,
+                    "test_identity": 500,
+                    "test_conflicting": 500
+                }
+            }
+        }
+
+    eval_cfg = config.get("evaluation_export", {})
+    sizes = eval_cfg.get("sizes", {"dev_keep": 1000, "test_keep": 1000, "test_identity": 500, "test_conflicting": 500})
+
     # Seed random for deterministic sampling
     random.seed(42)
 
     # Reservoirs for each target evaluation dataset
     reservoirs: Dict[str, List[Dict[str, Any]]] = {
-        "dev_keep": [],          # Target: 1000
-        "test_keep": [],         # Target: 1000
-        "test_identity": [],     # Target: 500
-        "test_conflicting": []   # Target: 500
+        "dev_keep": [],
+        "test_keep": [],
+        "test_identity": [],
+        "test_conflicting": []
     }
     
     limits = {
-        "dev_keep": 1000,
-        "test_keep": 1000,
-        "test_identity": 500,
-        "test_conflicting": 500
+        "dev_keep": sizes.get("dev_keep", 1000),
+        "test_keep": sizes.get("test_keep", 1000),
+        "test_identity": sizes.get("test_identity", 500),
+        "test_conflicting": sizes.get("test_conflicting", 500)
     }
 
     counts = {
@@ -38,8 +58,7 @@ def main():
         "test_conflicting": 0
     }
 
-    print("Pass 1: Running reservoir sampling over canonical recipes (streaming)...")
-    
+    print("Running reservoir sampling over canonical recipes (single pass)...")
     with open(input_file, "r", encoding="utf-8") as f:
         for line in f:
             if not line.strip():
@@ -52,17 +71,16 @@ def main():
             split = recipe.get("split")
             status = recipe.get("status")
 
-            # Match recipe to one of our target evaluation categories
             category = None
             if split == "dev" and status == "keep":
                 category = "dev_keep"
             elif split == "test":
-                if status == "keep":
-                    category = "test_keep"
-                elif status == "review_identity":
+                if status == "review_identity":
                     category = "test_identity"
-                elif status == "keep_conflicting":
+                elif recipe.get("is_conflicting_pair", False):
                     category = "test_conflicting"
+                elif status == "keep":
+                    category = "test_keep"
 
             if category is None:
                 continue
@@ -71,7 +89,6 @@ def main():
             seen_count = counts[category]
             limit = limits[category]
 
-            # Reservoir sampling update logic
             if len(reservoirs[category]) < limit:
                 reservoirs[category].append(recipe)
             else:
@@ -79,32 +96,7 @@ def main():
                 if r < limit:
                     reservoirs[category][r] = recipe
 
-    # Extract all pair_ids that were sampled for Pass 2
-    sampled_pair_ids = set()
-    for cat, items in reservoirs.items():
-        for item in items:
-            sampled_pair_ids.add(item["pair_id"])
-
-    print(f"Sampled {len(sampled_pair_ids)} unique pairs. Pass 2: Collecting all known outputs for these pairs...")
-    
-    # Map pair_id -> set of outputs to verify multiple alternative correct answers
-    pair_outputs = defaultdict(set)
-    
-    with open(input_file, "r", encoding="utf-8") as f:
-        for line in f:
-            if not line.strip():
-                continue
-            try:
-                recipe = json.loads(line)
-            except Exception:
-                continue
-            
-            pair_id = recipe.get("pair_id")
-            if pair_id in sampled_pair_ids:
-                pair_outputs[pair_id].add(recipe.get("output"))
-
-    print("Formatting and writing evaluation sets...")
-    
+    print("Writing evaluation sets...")
     eval_sets = {
         "eval_dev_1k.jsonl": reservoirs["dev_keep"],
         "eval_test_1k.jsonl": reservoirs["test_keep"],
@@ -116,14 +108,13 @@ def main():
         path = os.path.join(processed_dir, filename)
         with open(path, "w", encoding="utf-8") as f:
             for recipe in recipes:
-                pair_id = recipe["pair_id"]
                 eval_item = {
-                    "pair_id": pair_id,
+                    "pair_id": recipe["pair_id"],
                     "pair_key": recipe["pair_key"],
                     "input_a": recipe["input_a"],
                     "input_b": recipe["input_b"],
-                    "known_outputs": sorted(list(pair_outputs[pair_id])),
-                    "canonical_output": recipe["output"],
+                    "known_outputs": recipe["known_outputs"],
+                    "canonical_output": recipe["canonical_output"],
                     "status": recipe["status"],
                     "split": recipe["split"]
                 }
