@@ -6,16 +6,16 @@ This document describes how the raw datasets were normalized and consolidated in
 
 We consolidated four distinct datasets, each with unique schemas and formatting styles:
 
-1. **Ericlewis (`datasets/eirclewis/data/`)**:
+1. **Ericlewis (`datasets/raw/eirclewis/data/`)**:
    - **Format**: JSON Lines containing training/validation/test sets designed for LLM instruction tuning.
    - **Key extraction**: Extracted user message contents (separated by ` + `) as inputs and assistant responses (containing JSON representation of results and emojis) as outputs.
-2. **Elementia (`datasets/elementia/`)**:
+2. **Elementia (`datasets/raw/elementia/`)**:
    - **Format**: A CSV file (`recipes.csv`) containing combinations.
    - **Key extraction**: Split row elements by `+` to extract the two inputs and mapped the second column directly to the output. Emojis were initially missing.
-3. **Expitau (`datasets/expitau/`)**:
+3. **Expitau (`datasets/raw/expitau/`)**:
    - **Format**: A large data package (`data.json`) where recipes are mapped by hashed keys to a lookup index.
    - **Key extraction**: Loaded the lookup index mapping hash keys to `[emoji, name, cost]` and translated the semicolon-separated recipe combinations into human-readable element names and emojis.
-4. **Redfast00 (`datasets/redfast00/`)**:
+4. **Redfast00 (`datasets/raw/redfast00/`)**:
    - **Format**: Several JSON files representing different Alchemy games in the `JSONrecipes/` folder.
    - **Key extraction**: Loaded name mappings and lists of combinations containing lists of ingredient IDs and output IDs. Flattened recipes with multiple outputs into individual single-output observations.
 

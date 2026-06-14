@@ -22,7 +22,7 @@ def get_emoji(name: str) -> Optional[str]:
 
 def parse_ericlewis(base_dir: str) -> List[Tuple[str, str, str, Optional[str], str]]:
     recipes = []
-    data_dir = os.path.join(base_dir, "datasets", "eirclewis", "data")
+    data_dir = os.path.join(base_dir, "datasets", "raw", "eirclewis", "data")
     for filename in ["train.jsonl", "val.jsonl", "test.jsonl"]:
         file_path = os.path.join(data_dir, filename)
         if not os.path.exists(file_path):
@@ -62,7 +62,7 @@ def parse_ericlewis(base_dir: str) -> List[Tuple[str, str, str, Optional[str], s
 
 def parse_elementia(base_dir: str) -> List[Tuple[str, str, str, Optional[str], str]]:
     recipes = []
-    file_path = os.path.join(base_dir, "datasets", "elementia", "recipes.csv")
+    file_path = os.path.join(base_dir, "datasets", "raw", "elementia", "recipes.csv")
     if not os.path.exists(file_path):
         print(f"Warning: File {file_path} not found.")
         return recipes
@@ -87,7 +87,7 @@ def parse_elementia(base_dir: str) -> List[Tuple[str, str, str, Optional[str], s
 
 def parse_expitau(base_dir: str) -> List[Tuple[str, str, str, Optional[str], str]]:
     recipes = []
-    file_path = os.path.join(base_dir, "datasets", "expitau", "web/data/data.json")
+    file_path = os.path.join(base_dir, "datasets", "raw", "expitau", "web/data/data.json")
     if not os.path.exists(file_path):
         print(f"Warning: File {file_path} not found.")
         return recipes
@@ -123,7 +123,7 @@ def parse_expitau(base_dir: str) -> List[Tuple[str, str, str, Optional[str], str
 
 def parse_redfast00(base_dir: str) -> List[Tuple[str, str, str, Optional[str], str]]:
     recipes = []
-    dir_path = os.path.join(base_dir, "datasets", "redfast00", "JSONrecipes")
+    dir_path = os.path.join(base_dir, "datasets", "raw", "redfast00", "JSONrecipes")
     if not os.path.exists(dir_path):
         print(f"Warning: Directory {dir_path} not found.")
         return recipes

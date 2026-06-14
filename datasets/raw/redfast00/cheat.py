@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import json
-from recipe import RecipeReader, RecipeCheater
+from datasets.raw.redfast00.recipe import RecipeReader, RecipeCheater
 import sys
 
 ## Parse CLI arguments
