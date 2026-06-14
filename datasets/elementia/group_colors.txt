@@ -1,0 +1,27 @@
+air: #a2c4c9
+earth: #cc4125
+fire: #ff9900
+water: #4a86e8
+space: #999999
+basic life: #ff00ff
+energy: #ffff00
+plants: #00ff00
+animals: #6aa84f
+special: #fff2cc
+human things: #b6d7a8
+construction: #b45f06
+buildings: #ff4f4f
+civilization: #999999
+people: #b6d7a8
+tools: #999999
+vehicles: #ad0000
+valuables: #f1c232
+animal products: #6aa84f
+human food: #ff0000
+color: #ffffff
+electronics: #d2d698
+animal things: #6aa84f
+atomic: #ff0000
+body parts: #b6d7a8
+culture: #8e7cc3
+meta: #123456

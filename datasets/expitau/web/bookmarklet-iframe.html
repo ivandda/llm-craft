@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<!-- This document is on neal.fun, providing updates via postmessage back to the host -->
+
+<head>
+   <meta charset="UTF-8">
+   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+   <title>Bookmarklet iframe</title>
+</head>
+
+<body>
+   <script>
+      let isActive = true;
+      let wikiTab = window.open(window.location.host.includes('localhost') ? `http://${window.location.host}/web/index.html` : 'https://expitau.com/InfiniteCraftWiki');
+
+      let lastSaveData = [];
+      let saveData = [];
+      let index = null;
+      let isIndexReady = false;
+      let DATA_PREFIX = `https://expitau.com/InfiniteCraftWiki/data`
+      let indexChunks = []
+      let indexChunkCount = 0
+
+      fetch(DATA_PREFIX + `/metadata.json`)
+                    .then(response => { console.log(response); return response.json() })
+                    .then(metadata => {
+                        for (let i = 0; i < metadata.indexCount; i++) {
+                            fetch(DATA_PREFIX + `/index/idx-${i + 1}.json`).then(res => res.json()).then(chunk => {
+                                console.log("Loaded " + i)
+                                indexChunks = indexChunks.concat(chunk.map(x => [x[2], x[0]]))
+                                indexChunkCount += 1
+                                if (indexChunkCount >= metadata.indexCount) {
+                                    index = Object.fromEntries(indexChunks)
+                                    isIndexReady = true;
+                                }
+                            })
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error loading metadata:', error);
+                    });
+
+      function sendDataToWiki(type, data = {}) {
+         wikiTab.postMessage(JSON.stringify({ type, data }), `https://${window.location.host}`);
+      }
+
+      function processDataFromWiki(data) {
+         console.log("Heartbeat received")
+         if (!isActive) return;
+
+         if (data.type == 'heartbeat') {
+            sendDataToWiki('heartbeatAck')
+            lastHeartbeat = Date.now();
+         } else if (data.type == 'disconnect') {
+            sendDataToParent('disconnected')
+            isActive = false;
+         }
+      }
+
+      function sendDataToParent(type, data = {}) {
+         window.parent.postMessage(JSON.stringify({ type, data }), 'https://neal.fun')
+      }
+
+      function processDataFromParent(data) {
+         if (data.type != 'data') {
+            return
+         }
+
+         if (!isIndexReady) {
+            setTimeout(() => {
+               processDataFromParent(data)
+            }, 1000);
+            return
+         }
+         saveData = JSON.parse(data.data).elements.map(a => index[a.text]).filter(x => x === 0 || x);
+
+         if (saveData.join(",") !== lastSaveData.join(",")) {
+            console.log("Sending update", saveData, lastSaveData)
+            sendDataToWiki('update', saveData);
+            lastSaveData = saveData;
+         } else {
+            console.log('Save data matches!');
+         }
+      }
+
+      // Heartbeat with wiki
+      let lastHeartbeat = Date.now();
+      setInterval(() => {
+         if (!isActive) return;
+
+         if (Date.now() - lastHeartbeat > 5000) {
+            sendDataToParent('disconnected')
+         } else {
+            sendDataToParent('connected')
+         }
+      }, 500);
+
+      // Add event listener for reciving local storage from Infinite Craft
+      window.addEventListener('message', function (event) {
+         if (!isActive) return;
+
+         if (event.origin == `https://${window.location.host}`) {
+            processDataFromWiki(JSON.parse(event.data))
+            return
+         }
+
+         if (event.origin == 'https://neal.fun') {
+            processDataFromParent(JSON.parse(event.data))
+            return
+         }
+      }, false);
+   </script>
+</body>
+
+</html>
