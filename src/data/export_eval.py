@@ -97,11 +97,21 @@ def main():
                     reservoirs[category][r] = recipe
 
     print("Writing evaluation sets...")
+    def format_size(val: int) -> str:
+        if val >= 1000 and val % 1000 == 0:
+            return f"{val // 1000}k"
+        return str(val)
+
+    dev_size_str = format_size(limits["dev_keep"])
+    test_size_str = format_size(limits["test_keep"])
+    identity_size_str = format_size(limits["test_identity"])
+    conflicting_size_str = format_size(limits["test_conflicting"])
+
     eval_sets = {
-        "eval_dev_1k.jsonl": reservoirs["dev_keep"],
-        "eval_test_1k.jsonl": reservoirs["test_keep"],
-        "eval_test_identity_500.jsonl": reservoirs["test_identity"],
-        "eval_test_conflicting_500.jsonl": reservoirs["test_conflicting"]
+        f"eval_dev_{dev_size_str}.jsonl": reservoirs["dev_keep"],
+        f"eval_test_{test_size_str}.jsonl": reservoirs["test_keep"],
+        f"eval_test_identity_{identity_size_str}.jsonl": reservoirs["test_identity"],
+        f"eval_test_conflicting_{conflicting_size_str}.jsonl": reservoirs["test_conflicting"]
     }
 
     for filename, recipes in eval_sets.items():

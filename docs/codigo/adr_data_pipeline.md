@@ -57,3 +57,17 @@ This document details the architectural decisions made during the design and imp
 * **Context**: Hardcoding splits, filter rules, prompt templates, and execution order across multiple scripts hurts reproducibility.
 * **Decision**: Create a single `configs/pipeline_config.yaml` and a master orchestrator `src/data/run_pipeline.py` that imports and runs all steps in-process.
 * **Consequences**: Promotes reproducibility (clone $\rightarrow$ config $\rightarrow$ run). In-process function execution is faster than spawning python subprocesses and shares common schema imports.
+
+---
+
+### 8. Garbage/Noise Concepts Filtering
+* **Context**: Raw logs contain automatic crafter bot noise (e.g. hashtags `#bloodmoon`, numeric elements `0`, `007`, `0002`, `00b5`, and syntax garbage like `0;`). Fine-tuning on these pollutes the model's vocabulary and composition skills.
+* **Decision**: Drop any recipe where either `input_a`, `input_b`, or the output matches garbage patterns: starting with `0`, purely numeric, containing invalid code characters (`#`, `;`, `{`, `}`, `[`, `]`, `|`, `\`, `+`, `*`), or single-character punctuation.
+* **Consequences**: Safely prunes noise from all downstream training and evaluation splits, ensuring a clean student model. Discarded 48k+ recipes.
+
+---
+
+### 9. Configurable & Dynamic Evaluation Sizes
+* **Context**: Hardcoding evaluation sizes (`1k` and `500` samples) directly in filenames makes config modifications misleading.
+* **Decision**: Allow the user to configure exact target sizes under `evaluation_export: sizes` in the config YAML, and update `export_eval.py` to dynamically name files using a size formatter (e.g., `eval_dev_1k.jsonl` or `eval_test_2k.jsonl`).
+* **Consequences**: Synchronizes config sizes with output filenames automatically, preventing mismatches and improving pipeline flexibility.

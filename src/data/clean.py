@@ -30,6 +30,26 @@ def assign_split(pair_key: Tuple[str, str], split_ratios: Dict[str, float]) -> s
     else:
         return "test"
 
+def is_garbage_concept(text: str) -> bool:
+    if not text:
+        return True
+    text = text.strip()
+    # 1. Contains hashtags, backticks, or other code/formatting symbols
+    if any(char in text for char in ("#", "`", ";", "{", "}", "[", "]", "|", "\\", "<", ">", "+", "*", "=")):
+        return True
+    # 2. Purely numeric (e.g. "0", "007", "123", "2024", "404")
+    # Strip common punctuation/symbols first to check if it's numeric
+    numeric_check = text.replace(".", "").replace(",", "").replace("-", "").replace("%", "").strip()
+    if numeric_check.isdigit():
+        return True
+    # 3. Starts with '0' (zero)
+    if text.startswith("0"):
+        return True
+    # 4. Single-character punctuation or symbols
+    if len(text) == 1 and not text.isalnum():
+        return True
+    return False
+
 def main():
     base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
     config_file = os.path.join(base_dir, "configs", "pipeline_config.yaml")
@@ -51,6 +71,7 @@ def main():
 
     clean_cfg = config.get("cleaning", {})
     lowercase_all = clean_cfg.get("lowercase_all", True)
+    filter_garbage = clean_cfg.get("filter_garbage", True)
     split_ratios = clean_cfg.get("split_ratio", {"train": 0.80, "dev": 0.10, "test": 0.10})
 
     if not os.path.exists(input_file):
@@ -68,6 +89,7 @@ def main():
     pair_sources = defaultdict(set)
 
     line_count = 0
+    garbage_discarded_count = 0
     with open(input_file, "r", encoding="utf-8") as f:
         for line in f:
             if not line.strip():
@@ -97,6 +119,11 @@ def main():
             # Skip empty records
             if not key_a or not key_b or not key_out:
                 continue
+
+            if filter_garbage:
+                if is_garbage_concept(key_a) or is_garbage_concept(key_b) or is_garbage_concept(key_out):
+                    garbage_discarded_count += 1
+                    continue
 
             pair_key = (key_a, key_b) if key_a <= key_b else (key_b, key_a)
 
@@ -129,6 +156,7 @@ def main():
         "num_conflicting_pairs": 0,
         "num_keep": 0,
         "num_review_identity": 0,
+        "num_garbage_discarded": garbage_discarded_count,
         "split_counts": {"train": 0, "dev": 0, "test": 0}
     }
 

@@ -30,7 +30,7 @@ def main():
     exclude_identities = sft_cfg.get("exclude_identities", True)
     prompt_template = sft_cfg.get("prompt_template", "Given two concepts, combine them into one resulting concept.\n\nConcept A: {input_a}\nConcept B: {input_b}\n\nReturn only the resulting concept.")
 
-    variants = ["clean", "all"]
+    variants = sft_cfg.get("variants", ["clean", "all"])
     splits = ["train", "dev", "test"]
 
     file_handles: Dict[str, Dict[str, TextIO]] = {}
@@ -111,45 +111,47 @@ def main():
                     ],
                     "metadata": clean_metadata
                 }
-                file_handles["clean"][split].write(json.dumps(sft_item_clean, ensure_ascii=False) + "\n")
-                counts["clean"][split] += 1
+                if "clean" in variants:
+                    file_handles["clean"][split].write(json.dumps(sft_item_clean, ensure_ascii=False) + "\n")
+                    counts["clean"][split] += 1
 
             # 2. Export ALL variant (preserves ALL creative outputs)
-            known_outputs = recipe.get("known_outputs", [])
-            known_emojis = recipe.get("known_emojis", [])
-            observation_counts = recipe.get("observation_counts", [])
+            if "all" in variants:
+                known_outputs = recipe.get("known_outputs", [])
+                known_emojis = recipe.get("known_emojis", [])
+                observation_counts = recipe.get("observation_counts", [])
 
-            for i, output in enumerate(known_outputs):
-                # We can also check if we want to exclude identities in sft_all if config requested it
-                # Usually sft_all keeps everything, but let's respect exclude_identities if it's set
-                # In standard SFT training, keeping identity copies in "sft_all" is normal, but let's follow the status
-                is_identity_output = (output == input_a or output == input_b)
-                if exclude_identities and is_identity_output:
-                    continue
+                for i, output in enumerate(known_outputs):
+                    # We can also check if we want to exclude identities in sft_all if config requested it
+                    # Usually sft_all keeps everything, but let's respect exclude_identities if it's set
+                    # In standard SFT training, keeping identity copies in "sft_all" is normal, but let's follow the status
+                    is_identity_output = (output == input_a or output == input_b)
+                    if exclude_identities and is_identity_output:
+                        continue
 
-                from src.data.schemas import stable_id
-                recipe_id = stable_id([input_a, input_b, output])
+                    from src.data.schemas import stable_id
+                    recipe_id = stable_id([input_a, input_b, output])
 
-                all_metadata = dict(metadata_template)
-                all_metadata["recipe_id"] = recipe_id
-                all_metadata["recipe_key"] = f"{recipe.get('pair_key')}=>{output}"
-                all_metadata["observation_count"] = observation_counts[i]
+                    all_metadata = dict(metadata_template)
+                    all_metadata["recipe_id"] = recipe_id
+                    all_metadata["recipe_key"] = f"{recipe.get('pair_key')}=>{output}"
+                    all_metadata["observation_count"] = observation_counts[i]
 
-                sft_item_all = {
-                    "messages": [
-                        {
-                            "role": "user",
-                            "content": get_sft_prompt(prompt_template, input_a, input_b)
-                        },
-                        {
-                            "role": "assistant",
-                            "content": output
-                        }
-                    ],
-                    "metadata": all_metadata
-                }
-                file_handles["all"][split].write(json.dumps(sft_item_all, ensure_ascii=False) + "\n")
-                counts["all"][split] += 1
+                    sft_item_all = {
+                        "messages": [
+                            {
+                                "role": "user",
+                                "content": get_sft_prompt(prompt_template, input_a, input_b)
+                            },
+                            {
+                                "role": "assistant",
+                                "content": output
+                            }
+                        ],
+                        "metadata": all_metadata
+                    }
+                    file_handles["all"][split].write(json.dumps(sft_item_all, ensure_ascii=False) + "\n")
+                    counts["all"][split] += 1
 
     # Close handles
     for var in variants:

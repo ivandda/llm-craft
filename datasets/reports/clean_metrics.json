@@ -1,11 +1,12 @@
 {
-  "num_canonical_pairs": 6541348,
+  "num_canonical_pairs": 6494822,
   "num_conflicting_pairs": 5007,
-  "num_keep": 6029948,
-  "num_review_identity": 511400,
+  "num_keep": 5990772,
+  "num_review_identity": 504050,
+  "num_garbage_discarded": 48106,
   "split_counts": {
-    "train": 5232703,
-    "dev": 654317,
-    "test": 654328
+    "train": 5195429,
+    "dev": 649737,
+    "test": 649656
   }
 }

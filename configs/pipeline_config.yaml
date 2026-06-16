@@ -9,6 +9,8 @@ normalization:
 cleaning:
   # Normalizar todo a minúsculas
   lowercase_all: true
+  # Filtrar conceptos ruidosos (números puros, hashes, caracteres extraños)
+  filter_garbage: true
   # Proporciones de los conjuntos
   split_ratio:
     train: 0.80
@@ -23,6 +25,10 @@ sft_export:
   exclude_identities: true
   # Plantilla de prompt conversacional
   prompt_template: "Given two concepts, combine them into one resulting concept.\n\nConcept A: {input_a}\nConcept B: {input_b}\n\nReturn only the resulting concept."
+  # Variantes de SFT a generar (descomenta "all" si deseas generar el dataset completo de 5M+ recetas)
+  variants:
+    - "clean"
+    # - "all"
 
 # Paso 4: Exportación de Sets de Evaluación (export_eval.py)
 evaluation_export:

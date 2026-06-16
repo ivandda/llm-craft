@@ -54,6 +54,16 @@ Each recipe is tagged with a status:
 * `"review_identity"`: Output equals one of the inputs (e.g., `Water + Fire = Water`), flagged for manual review or future pruning.
 * `"drop_empty_output"`: Missing output.
 
+### 6. Garbage/Noise Concepts Filtering
+To prevent vocabulary pollution and keep student training clean, the pipeline checks for noisy/corrupt concepts if `filter_garbage: true` is configured:
+* **Discard Criteria**: A recipe is dropped if any concept (`input_a`, `input_b`, or `output`) meets any of the following:
+  1. **Hashtags/Prefixes**: Contains `#`, backticks, or other code characters (e.g., `#bloodmoon`).
+  2. **Purely Numeric**: Represents only digit characters (e.g. `0`, `007`, `123`).
+  3. **Zero-Prefixed Noise**: Starts with `"0"` (e.g., `00b5`, `0bs`, `0ct`, `0faz`).
+  4. **Suspicious Punctuation**: Contains characters like `;`, `{`, `}`, `[`, `]`, `|`, `\`, `<`, `>`, `+`, `*`.
+  5. **Single-Character Punctuation**: Non-alphanumeric single-character strings (e.g. `;`, `.`).
+* **Metrics**: The pipeline logs the count of dropped recipes under `"num_garbage_discarded"`.
+
 ---
 
 ## Split Assignment & Input Leakage Prevention
