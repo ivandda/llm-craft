@@ -155,8 +155,13 @@ def parse_redfast00(base_dir: str) -> List[Tuple[str, str, str, Optional[str], s
             if not name_a or not name_b:
                 continue
                 
+            name_a = name_a.replace("_", " ").strip()
+            name_b = name_b.replace("_", " ").strip()
+
             for res_id in results:
                 name_out = id_to_name.get(res_id) or id_to_name.get(str(res_id))
+                if name_out:
+                    name_out = name_out.replace("_", " ").strip()
                 if name_a and name_b and name_out:
                     recipes.append((name_a, name_b, name_out, None, source))
     return recipes
