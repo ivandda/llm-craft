@@ -60,10 +60,69 @@ uv run python -m src.data.export_eval
 
 ---
 
+## SFT y Google Colab
+
+### Preparar muestras para entrenamiento
+
+```bash
+uv run python -m src.sft.prepare_train_eval_data \
+  --train-input datasets/processed/sft_clean_train.jsonl \
+  --eval-input datasets/processed/sft_clean_dev.jsonl \
+  --train-output artifacts/data/sft_clean_train_sample_8000.jsonl \
+  --eval-output artifacts/data/sft_clean_dev_sample_2000.jsonl \
+  --train-sample-size 8000 \
+  --eval-sample-size 2000 \
+  --seed 42
+```
+
+### Crear zip para Colab
+
+```bash
+uv run python -m src.sft.create_colab_zip \
+  --train-file artifacts/data/sft_clean_train_sample_8000.jsonl \
+  --eval-file artifacts/data/sft_clean_dev_sample_2000.jsonl \
+  --output-path artifacts/colab/llm-craft-sft-colab.zip
+```
+
+En Colab, subir el zip y descomprimirlo:
+
+```bash
+!unzip -q llm-craft-sft-colab.zip -d /content
+%cd /content/llm-craft-colab
+!pip install -q uv
+!uv sync
+```
+
+### Entrenar
+
+```bash
+uv run python -m src.sft.train \
+  --train-file artifacts/data/sft_clean_train_sample_8000.jsonl \
+  --eval-file artifacts/data/sft_clean_dev_sample_2000.jsonl \
+  --output-dir artifacts/sft/smollm2-clean-lora \
+  --model-name HuggingFaceTB/SmolLM2-135M-Instruct \
+  --lora-mode lora \
+  --max-steps 100
+```
+
+### Inferencia
+
+```bash
+uv run python -m src.sft.predict \
+  --adapter-dir artifacts/sft/smollm2-clean-lora \
+  --input-a fire \
+  --input-b water
+```
+
+La guía completa está en [sft_training_colab.md](docs/codigo/sft_training_colab.md).
+
+---
+
 ## Documentación del Proyecto
 
 Para más detalles teóricos y de diseño, consulte:
 * [adr_data_pipeline.md](docs/codigo/adr_data_pipeline.md): Architecture Decision Record (ADR) con las decisiones del pipeline.
 * [data_pipeline.md](docs/codigo/data_pipeline.md): Especificaciones técnicas de la limpieza, hashes y formato SFT.
 * [data_normalization.md](docs/codigo/data_normalization.md): Proceso de extracción inicial de datasets crudos.
+* [sft_training_colab.md](docs/codigo/sft_training_colab.md): Comandos para preparar muestras SFT, empaquetar Colab, entrenar y predecir.
 * [destilacion_creatividad_composicional.md](docs/informe/destilacion_creatividad_composicional.md): Paper de diseño del proyecto de investigación.
