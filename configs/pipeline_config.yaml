@@ -4,6 +4,12 @@
 normalization:
   raw_dir: "datasets/raw"
   processed_dir: "datasets/processed"
+  # Toggle cuales raw datasets incluir en la normalización
+  raw_datasets:
+    ericlewis: true
+    elementia: true
+    expitau: false
+    redfast00: true
 
 # Paso 2: Limpieza y Splits (clean.py)
 cleaning:

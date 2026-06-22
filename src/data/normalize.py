@@ -1,5 +1,6 @@
 import os
 import json
+import yaml
 import glob
 import csv
 from typing import Dict, Optional, List, Tuple
@@ -22,7 +23,7 @@ def get_emoji(name: str) -> Optional[str]:
 
 def parse_ericlewis(base_dir: str) -> List[Tuple[str, str, str, Optional[str], str]]:
     recipes = []
-    data_dir = os.path.join(base_dir, "datasets", "raw", "eirclewis", "data")
+    data_dir = os.path.join(base_dir, "datasets", "raw", "ericlewis", "data")
     for filename in ["train.jsonl", "val.jsonl", "test.jsonl"]:
         file_path = os.path.join(data_dir, filename)
         if not os.path.exists(file_path):
@@ -170,25 +171,61 @@ def main():
     base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
     print(f"Project base directory: {base_dir}")
 
-    # Step 1: Parse all datasets to collect raw recipes and register emojis
-    print("Parsing ericlewis dataset...")
-    ericlewis_raw = parse_ericlewis(base_dir)
-    print(f"Parsed {len(ericlewis_raw)} recipes from ericlewis.")
+    # Load pipeline configuration to determine which raw datasets to parse
+    config_file = os.path.join(base_dir, "configs", "pipeline_config.yaml")
+    if os.path.exists(config_file):
+        with open(config_file, "r", encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+    else:
+        cfg = {}
 
-    print("Parsing elementia dataset...")
-    elementia_raw = parse_elementia(base_dir)
-    print(f"Parsed {len(elementia_raw)} recipes from elementia.")
+    norm_cfg = cfg.get("normalization", {})
+    datasets_cfg = norm_cfg.get("raw_datasets", {})
 
-    print("Parsing expitau dataset...")
-    expitau_raw = parse_expitau(base_dir)
-    print(f"Parsed {len(expitau_raw)} recipes from expitau.")
+    use_ericlewis = datasets_cfg.get("ericlewis",  True)
+    use_elementia = datasets_cfg.get("elementia", True)
+    use_expitau = datasets_cfg.get("expitau", True)
+    use_redfast00 = datasets_cfg.get("redfast00", True)
 
-    print("Parsing redfast00 dataset...")
-    redfast00_raw = parse_redfast00(base_dir)
-    print(f"Parsed {len(redfast00_raw)} recipes from redfast00.")
+    all_raw: List[Tuple[str, str, str, Optional[str], str]] = []
 
-    # Combine all raw recipes
-    all_raw = ericlewis_raw + elementia_raw + expitau_raw + redfast00_raw
+    # Step 1: Parse enabled datasets to collect raw recipes and register emojis
+    if use_ericlewis:
+        print("Parsing ericlewis dataset...")
+        ericlewis_raw = parse_ericlewis(base_dir)
+        print(f"Parsed {len(ericlewis_raw)} recipes from ericlewis.")
+        all_raw += ericlewis_raw
+    else:
+        print("Skipping ericlewis dataset (disabled in config).")
+        ericlewis_raw = []
+
+    if use_elementia:
+        print("Parsing elementia dataset...")
+        elementia_raw = parse_elementia(base_dir)
+        print(f"Parsed {len(elementia_raw)} recipes from elementia.")
+        all_raw += elementia_raw
+    else:
+        print("Skipping elementia dataset (disabled in config).")
+        elementia_raw = []
+
+    if use_expitau:
+        print("Parsing expitau dataset...")
+        expitau_raw = parse_expitau(base_dir)
+        print(f"Parsed {len(expitau_raw)} recipes from expitau.")
+        all_raw += expitau_raw
+    else:
+        print("Skipping expitau dataset (disabled in config).")
+        expitau_raw = []
+
+    if use_redfast00:
+        print("Parsing redfast00 dataset...")
+        redfast00_raw = parse_redfast00(base_dir)
+        print(f"Parsed {len(redfast00_raw)} recipes from redfast00.")
+        all_raw += redfast00_raw
+    else:
+        print("Skipping redfast00 dataset (disabled in config).")
+        redfast00_raw = []
+
     print(f"Total raw recipe observations parsed: {len(all_raw)}")
 
     # Step 2: Canonicalize and enrich with emojis
