@@ -13,6 +13,26 @@ Para instalar las dependencias y configurar el entorno virtual utilizando `uv`:
 uv sync
 ```
 
+### Frontend
+
+La interfaz jugable vive en `apps/web` como una app Next.js preparada para conectar modelos más adelante mediante contratos mock tipados. Incluye registro/login mock en memoria con credenciales seeded `admin/admin`, menu de modos (`Sandbox` y `Goal`), perfil con logros destacados y leaderboard mock para objetivos completados:
+
+```bash
+cd apps/web
+npm install
+npm run dev
+```
+
+Para validar el frontend:
+
+```bash
+npm run typecheck
+npm run test
+npm run build
+```
+
+Más detalles: [frontend_next_app.md](docs/codigo/frontend_next_app.md).
+
 ---
 
 ## Ejecución del Pipeline completo
