@@ -28,7 +28,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--train-file",
-        default="artifacts/data/sft_clean_train_sample_1000.jsonl",
+        default="artifacts/data/sft_clean_train_sample_8000.jsonl",
         help="Training JSONL file with `messages` records.",
     )
     parser.add_argument(

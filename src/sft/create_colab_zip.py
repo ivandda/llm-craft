@@ -78,7 +78,13 @@ def require_existing(paths: list[Path]) -> None:
     missing = [path.as_posix() for path in paths if not path.exists()]
     if missing:
         formatted = "\n".join(f"- {path}" for path in missing)
-        raise FileNotFoundError(f"Cannot build Colab zip because these paths are missing:\n{formatted}")
+        raise FileNotFoundError(
+            "Cannot build Colab zip because these paths are missing:\n"
+            f"{formatted}\n"
+            "If datasets/processed/eval_dev_1k.jsonl is missing, run:\n"
+            "uv run python -m src.data.run_pipeline\n"
+            "uv run python -m src.data.export_eval"
+        )
 
 
 def main() -> None:

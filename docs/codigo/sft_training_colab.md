@@ -52,6 +52,14 @@ El script `src/sft/create_colab_zip.py` arma un zip chico con:
 
 No incluye `.venv`, caches, checkpoints ni modelos entrenados.
 
+Antes de crear el zip, asegurate de que exista
+`datasets/processed/eval_dev_1k.jsonl`. Si falta, generalo con:
+
+```bash
+uv run python -m src.data.run_pipeline
+uv run python -m src.data.export_eval
+```
+
 Comando recomendado:
 
 ```bash
@@ -162,6 +170,8 @@ Return only the resulting concept."
 ## 7. Evaluar en batch
 
 Evaluar el adapter entrenado contra el set dev estructurado con respuestas conocidas:
+si `datasets/processed/eval_dev_1k.jsonl` no existe, correr primero
+`uv run python -m src.data.export_eval`.
 
 ```bash
 !uv run python -m src.eval.run_sft_eval \

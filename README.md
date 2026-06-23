@@ -77,6 +77,14 @@ uv run python -m src.sft.prepare_train_eval_data \
 
 ### Crear zip para Colab
 
+El zip incluye `datasets/processed/eval_dev_1k.jsonl` para evaluacion batch.
+Si todavia no existe, generarlo con:
+
+```bash
+uv run python -m src.data.run_pipeline
+uv run python -m src.data.export_eval
+```
+
 ```bash
 uv run python -m src.sft.create_colab_zip \
   --train-file artifacts/data/sft_clean_train_sample_8000.jsonl \
@@ -117,6 +125,7 @@ uv run python -m src.sft.predict \
 ### Evaluación batch
 
 Durante el desarrollo, usar `eval_dev_1k.jsonl` para comparar variantes sin tocar el test final.
+Si falta ese archivo, correr primero `uv run python -m src.data.export_eval`.
 
 Evaluar el modelo base contra respuestas conocidas de dev:
 
