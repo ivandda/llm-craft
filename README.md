@@ -114,6 +114,33 @@ uv run python -m src.sft.predict \
   --input-b water
 ```
 
+### Evaluación batch
+
+Durante el desarrollo, usar `eval_dev_1k.jsonl` para comparar variantes sin tocar el test final.
+
+Evaluar el modelo base contra respuestas conocidas de dev:
+
+```bash
+uv run python -m src.eval.run_sft_eval \
+  --eval-file datasets/processed/eval_dev_1k.jsonl \
+  --output-file artifacts/eval/smollm2-base-dev.jsonl \
+  --model-name HuggingFaceTB/SmolLM2-135M-Instruct
+```
+
+Evaluar un adapter LoRA entrenado en dev:
+
+```bash
+uv run python -m src.eval.run_sft_eval \
+  --eval-file datasets/processed/eval_dev_1k.jsonl \
+  --output-file artifacts/eval/smollm2-clean-lora-dev.jsonl \
+  --adapter-dir artifacts/sft/smollm2-clean-lora
+```
+
+El comando genera un JSONL con predicciones por ejemplo e imprime métricas agregadas:
+`canonical_accuracy`, `known_output_accuracy` y `empty_predictions`.
+
+Reservar `eval_test_1k.jsonl` para la evaluación final.
+
 La guía completa está en [sft_training_colab.md](docs/codigo/sft_training_colab.md).
 
 ---

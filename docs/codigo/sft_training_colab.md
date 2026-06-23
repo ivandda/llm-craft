@@ -48,6 +48,7 @@ El script `src/sft/create_colab_zip.py` arma un zip chico con:
 - `README.md`
 - `docs/`
 - los JSONL de train y eval indicados
+- `datasets/processed/eval_dev_1k.jsonl` para evaluacion batch durante desarrollo
 
 No incluye `.venv`, caches, checkpoints ni modelos entrenados.
 
@@ -158,6 +159,39 @@ Concept B: water
 Return only the resulting concept."
 ```
 
+## 7. Evaluar en batch
+
+Evaluar el adapter entrenado contra el set dev estructurado con respuestas conocidas:
+
+```bash
+!uv run python -m src.eval.run_sft_eval \
+  --eval-file datasets/processed/eval_dev_1k.jsonl \
+  --output-file artifacts/eval/smollm2-clean-lora-dev.jsonl \
+  --adapter-dir artifacts/sft/smollm2-clean-lora
+```
+
+Para una prueba rapida antes de correr el set completo:
+
+```bash
+!uv run python -m src.eval.run_sft_eval \
+  --eval-file datasets/processed/eval_dev_1k.jsonl \
+  --output-file artifacts/eval/smollm2-clean-lora-smoke.jsonl \
+  --adapter-dir artifacts/sft/smollm2-clean-lora \
+  --limit 5
+```
+
+El comando escribe un JSONL con una prediccion por par e imprime:
+`canonical_accuracy`, `known_output_accuracy` y `empty_predictions`.
+
+Reservar `eval_test_1k.jsonl` para la corrida final del experimento:
+
+```bash
+!uv run python -m src.eval.run_sft_eval \
+  --eval-file datasets/processed/eval_test_1k.jsonl \
+  --output-file artifacts/eval/smollm2-clean-lora-final-test.jsonl \
+  --adapter-dir artifacts/sft/smollm2-clean-lora
+```
+
 ## Resumen de scripts
 
 - `prepare_train_eval_data.py`: crea muestras deterministicas de train y eval.
@@ -165,3 +199,4 @@ Return only the resulting concept."
 - `train.py`: entrena un adapter LoRA o QLoRA sobre un modelo chat base.
 - `predict.py`: carga el modelo base y el adapter entrenado para generar una
   respuesta.
+- `run_sft_eval.py`: evalua un modelo base o adapter contra `known_outputs`.

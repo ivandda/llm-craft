@@ -7,6 +7,7 @@ from pathlib import Path
 DEFAULT_OUTPUT_PATH = "artifacts/colab/llm-craft-sft-colab.zip"
 DEFAULT_TRAIN_FILE = "artifacts/data/sft_clean_train_sample_8000.jsonl"
 DEFAULT_EVAL_FILE = "artifacts/data/sft_clean_dev_sample_2000.jsonl"
+DEFAULT_STRUCTURED_EVAL_FILE = "datasets/processed/eval_dev_1k.jsonl"
 
 EXCLUDED_DIRS = {"__pycache__", ".pytest_cache", ".ruff_cache"}
 EXCLUDED_SUFFIXES = {".pyc", ".pyo"}
@@ -30,6 +31,11 @@ def parse_args() -> argparse.Namespace:
         "--eval-file",
         default=DEFAULT_EVAL_FILE,
         help="Eval JSONL sample to include in the zip.",
+    )
+    parser.add_argument(
+        "--eval-set-file",
+        default=DEFAULT_STRUCTURED_EVAL_FILE,
+        help="Structured evaluation JSONL to include for batch model scoring.",
     )
     parser.add_argument(
         "--zip-root",
@@ -88,6 +94,7 @@ def main() -> None:
         project_root / "src",
         project_root / args.train_file,
         project_root / args.eval_file,
+        project_root / args.eval_set_file,
     ]
     if args.include_docs:
         required_paths.append(project_root / "docs")
@@ -104,13 +111,17 @@ def main() -> None:
         if args.include_docs:
             add_path(zip_handle, project_root / "docs", zip_root / "docs")
 
-        data_files = [project_root / args.train_file, project_root / args.eval_file]
+        data_files = [
+            project_root / args.train_file,
+            project_root / args.eval_file,
+            project_root / args.eval_set_file,
+        ]
         for data_file in data_files:
             add_file(zip_handle, data_file, zip_root / data_file.relative_to(project_root))
 
     print(
         f"Wrote {output_path.as_posix()} with train={args.train_file} "
-        f"and eval={args.eval_file}"
+        f"eval={args.eval_file} and eval_set={args.eval_set_file}"
     )
 
 
