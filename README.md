@@ -145,6 +145,28 @@ La guía completa está en [sft_training_colab.md](docs/codigo/sft_training_cola
 
 ---
 
+## Frontend
+
+La interfaz jugable vive en `apps/web` como una app Next.js preparada para conectar modelos más adelante mediante contratos mock tipados. Incluye registro/login mock en memoria con credenciales seeded `admin/admin`, menu de modos (`Sandbox` y `Goal`), perfil con logros destacados y leaderboard mock para objetivos completados.
+
+```bash
+cd apps/web
+npm ci
+npm run dev
+```
+
+Para validar el frontend:
+
+```bash
+npm run typecheck
+npm run test
+npm run build
+```
+
+Más detalles: [frontend_next_app.md](docs/codigo/frontend_next_app.md).
+
+---
+
 ## Documentación del Proyecto
 
 Para más detalles teóricos y de diseño, consulte:
@@ -152,4 +174,5 @@ Para más detalles teóricos y de diseño, consulte:
 * [data_pipeline.md](docs/codigo/data_pipeline.md): Especificaciones técnicas de la limpieza, hashes y formato SFT.
 * [data_normalization.md](docs/codigo/data_normalization.md): Proceso de extracción inicial de datasets crudos.
 * [sft_training_colab.md](docs/codigo/sft_training_colab.md): Comandos para preparar muestras SFT, empaquetar Colab, entrenar y predecir.
+* [frontend_next_app.md](docs/codigo/frontend_next_app.md): Guía para ejecutar, validar y extender la app Next.js jugable.
 * [destilacion_creatividad_composicional.md](docs/informe/destilacion_creatividad_composicional.md): Paper de diseño del proyecto de investigación.
