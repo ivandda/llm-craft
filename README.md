@@ -60,10 +60,128 @@ uv run python -m src.data.export_eval
 
 ---
 
+## SFT y Google Colab
+
+### Preparar muestras para entrenamiento
+
+```bash
+uv run python -m src.sft.prepare_train_eval_data \
+  --train-input datasets/processed/sft_clean_train.jsonl \
+  --eval-input datasets/processed/sft_clean_dev.jsonl \
+  --train-output artifacts/data/sft_clean_train_sample_8000.jsonl \
+  --eval-output artifacts/data/sft_clean_dev_sample_2000.jsonl \
+  --train-sample-size 8000 \
+  --eval-sample-size 2000 \
+  --seed 42
+```
+
+### Crear zip para Colab
+
+El zip incluye `datasets/processed/eval_dev_1k.jsonl` para evaluacion batch.
+Si todavia no existe, generarlo con:
+
+```bash
+uv run python -m src.data.run_pipeline
+uv run python -m src.data.export_eval
+```
+
+```bash
+uv run python -m src.sft.create_colab_zip \
+  --train-file artifacts/data/sft_clean_train_sample_8000.jsonl \
+  --eval-file artifacts/data/sft_clean_dev_sample_2000.jsonl \
+  --output-path artifacts/colab/llm-craft-sft-colab.zip
+```
+
+En Colab, subir el zip y descomprimirlo:
+
+```bash
+!unzip -q llm-craft-sft-colab.zip -d /content
+%cd /content/llm-craft-colab
+!pip install -q uv
+!uv sync
+```
+
+### Entrenar
+
+```bash
+uv run python -m src.sft.train \
+  --train-file artifacts/data/sft_clean_train_sample_8000.jsonl \
+  --eval-file artifacts/data/sft_clean_dev_sample_2000.jsonl \
+  --output-dir artifacts/sft/smollm2-clean-lora \
+  --model-name HuggingFaceTB/SmolLM2-135M-Instruct \
+  --lora-mode lora \
+  --max-steps 100
+```
+
+### Inferencia
+
+```bash
+uv run python -m src.sft.predict \
+  --adapter-dir artifacts/sft/smollm2-clean-lora \
+  --input-a fire \
+  --input-b water
+```
+
+### Evaluación batch
+
+Durante el desarrollo, usar `eval_dev_1k.jsonl` para comparar variantes sin tocar el test final.
+Si falta ese archivo, correr primero `uv run python -m src.data.export_eval`.
+
+Evaluar el modelo base contra respuestas conocidas de dev:
+
+```bash
+uv run python -m src.eval.run_sft_eval \
+  --eval-file datasets/processed/eval_dev_1k.jsonl \
+  --output-file artifacts/eval/smollm2-base-dev.jsonl \
+  --model-name HuggingFaceTB/SmolLM2-135M-Instruct
+```
+
+Evaluar un adapter LoRA entrenado en dev:
+
+```bash
+uv run python -m src.eval.run_sft_eval \
+  --eval-file datasets/processed/eval_dev_1k.jsonl \
+  --output-file artifacts/eval/smollm2-clean-lora-dev.jsonl \
+  --adapter-dir artifacts/sft/smollm2-clean-lora
+```
+
+El comando genera un JSONL con predicciones por ejemplo e imprime métricas agregadas:
+`canonical_accuracy`, `known_output_accuracy` y `empty_predictions`.
+
+Reservar `eval_test_1k.jsonl` para la evaluación final.
+
+La guía completa está en [sft_training_colab.md](docs/codigo/sft_training_colab.md).
+
+---
+
+## Frontend
+
+La interfaz jugable vive en `apps/web` como una app Next.js preparada para conectar modelos más adelante mediante contratos mock tipados. Incluye registro/login mock en memoria con credenciales seeded `admin/admin`, menu de modos (`Sandbox` y `Goal`), perfil con logros destacados y leaderboard mock para objetivos completados.
+
+```bash
+cd apps/web
+npm ci
+npm run dev
+```
+
+Para validar el frontend:
+
+```bash
+npm run typecheck
+npm run test
+npm run build
+```
+
+Más detalles: [frontend_next_app.md](docs/codigo/frontend_next_app.md).
+
+---
+
 ## Documentación del Proyecto
 
 Para más detalles teóricos y de diseño, consulte:
 * [adr_data_pipeline.md](docs/codigo/adr_data_pipeline.md): Architecture Decision Record (ADR) con las decisiones del pipeline.
 * [data_pipeline.md](docs/codigo/data_pipeline.md): Especificaciones técnicas de la limpieza, hashes y formato SFT.
 * [data_normalization.md](docs/codigo/data_normalization.md): Proceso de extracción inicial de datasets crudos.
+* [sft_training_colab.md](docs/codigo/sft_training_colab.md): Comandos para preparar muestras SFT, empaquetar Colab, entrenar y predecir.
+* [frontend_next_app.md](docs/codigo/frontend_next_app.md): Guía para ejecutar, validar y extender la app Next.js jugable.
 * [destilacion_creatividad_composicional.md](docs/informe/destilacion_creatividad_composicional.md): Paper de diseño del proyecto de investigación.

@@ -195,6 +195,17 @@ cython_debug/
 # Ruff stuff:
 .ruff_cache/
 
+# Node / Next.js
+node_modules/
+.next/
+out/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.tsbuildinfo
+!apps/web/src/lib/
+!apps/web/src/lib/**
+
 # PyPI configuration file
 .pypirc
 
