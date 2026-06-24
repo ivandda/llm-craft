@@ -41,7 +41,7 @@ This document details the architectural decisions made during the design and imp
 
 ### 5. Exclusion of Identity Copies from SFT Clean Baseline
 * **Context**: Recipes where the output is identical to one of the inputs (e.g., `Jacket + Worse = Jacket`) teach the model to cheat by lazy-copying the input when confused.
-* **Decision**: Mark these recipes as `review_identity` and exclude them from the strict `sft_clean` training baseline.
+* **Decision**: Mark these recipes as `review_identity` and exclude them from the strict recipe training baseline.
 * **Consequences**: Forces the student model to learn actual semantic combination, though it reduces the size of the training pool by ~7.8%.
 
 ---
@@ -71,3 +71,17 @@ This document details the architectural decisions made during the design and imp
 * **Context**: Hardcoding evaluation sizes (`1k` and `500` samples) directly in filenames makes config modifications misleading.
 * **Decision**: Allow the user to configure exact target sizes under `evaluation_export: sizes` in the config YAML, and update `export_eval.py` to dynamically name files using a size formatter (e.g., `eval_dev_1k.jsonl` or `eval_test_2k.jsonl`).
 * **Consequences**: Synchronizes config sizes with output filenames automatically, preventing mismatches and improving pipeline flexibility.
+
+---
+
+### 10. Commonsense Quality Gate for SFT/Evaluation
+* **Context**: Expitau is large but contains many malformed or game-meme concepts, including formulas, random acronyms, long sentence-like titles, and plausible-looking but bad compounds. These examples are bad targets for a clean commonsense SFT baseline.
+* **Decision**: Add `src/data/quality.py` and make cleaning reject recipes whose inputs or outputs fail configurable concept-shape checks. Treat Expitau as untrusted by default: an Expitau recipe must use concepts already present in trusted non-Expitau sources before it can enter SFT/evaluation.
+* **Consequences**: Expitau can be enabled as a high-precision augmentation source without pretending that regex can solve semantic plausibility. The pipeline writes minimal prompt-free recipe artifacts (`recipes_{split}.jsonl`, `eval_{split}_{size}.jsonl`, and `quality_reject_samples.jsonl`) so humans can quickly inspect accepted and rejected examples.
+
+---
+
+### 11. Prompt-Free Processed Datasets
+* **Context**: Storing full chat prompts in `datasets/processed` created many near-duplicate files and mixed data facts with runtime presentation choices.
+* **Decision**: Store only recipe facts in processed datasets: `input_a`, `input_b`, and `outputs`/`known_outputs`. Training and evaluation scripts render prompts at runtime from configurable templates.
+* **Consequences**: The processed directory is easier to audit (`A+B={C,D}`), prompt experiments do not require regenerating datasets, and runtime prompt injection remains isolated to model-facing code.

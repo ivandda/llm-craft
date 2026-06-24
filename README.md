@@ -24,7 +24,7 @@ uv run python -m src.data.run_pipeline
 ```
 
 Toda la ejecución se puede configurar de forma centralizada en el archivo de configuración:
-* **Configuración**: [pipeline_config.yaml](configs/pipeline_config.yaml) (permite controlar proporciones de splits, exclusión de copias de identidad, prompt templates y tamaños de sets de evaluación).
+* **Configuración**: [pipeline_config.yaml](configs/pipeline_config.yaml) (permite controlar fuentes raw, filtros de calidad, proporciones de splits, exclusión de copias de identidad, prompt templates y tamaños de sets de evaluación).
 
 ---
 
@@ -42,21 +42,22 @@ Deduplica observaciones raw, unifica a minúsculas y asigna splits deterministas
 ```bash
 uv run python -m src.data.clean
 ```
-* **Qué hace**: Convierte todos los conceptos a minúsculas, agrupa las recetas duplicadas por par de entrada, identifica y calcula conflictos (`is_conflicting_pair`), y asigna cada combinación a `train`/`dev`/`test` usando hashes del par de entrada para evitar filtración de datos (leakage). Genera `recipe_canonical_v0.jsonl` y `clean_metrics.json`.
+* **Qué hace**: Convierte todos los conceptos a minúsculas, filtra recetas ruidosas o no comunes, agrupa las recetas duplicadas por par de entrada, identifica conflictos (`is_conflicting_pair`), y asigna cada combinación a `train`/`dev`/`test` usando hashes del par de entrada para evitar filtración de datos (leakage). Genera `recipe_canonical_v0.jsonl`, `clean_metrics.json` y muestras revisables en `quality_reject_samples.jsonl`.
 
-### 3. Exportación para Fine-Tuning (SFT) (Capa de Oro)
-Prepara los datasets conversacionales para el entrenamiento supervisado.
+### 3. Exportación de Recetas para Fine-Tuning (SFT) (Capa de Oro)
+Prepara datasets mínimos de recetas para entrenamiento supervisado. Los prompts no se guardan en `datasets/processed`; se inyectan en runtime desde los scripts de entrenamiento/evaluación.
 ```bash
 uv run python -m src.data.export_sft
 ```
-* **Qué hace**: Exporta dos variantes conversacionales en formato `messages`: `sft_clean` (recetas sin conflictos ni copias triviales) y `sft_all` (todas las recetas válidas incluyendo conflictos), aplicando el prompt template configurado y los metadatos enriquecidos (`pair_id`, `recipe_id`, etc.).
+* **Qué hace**: Exporta `recipes_train.jsonl`, `recipes_dev.jsonl` y `recipes_test.jsonl`. Cada fila tiene `input_a`, `input_b` y `outputs`, por ejemplo `{"input_a":"fire","input_b":"water","outputs":["steam","mist"]}`.
 
 ### 4. Exportación de Conjuntos de Evaluación
 Genera los datasets estructurados con respuestas alternativas válidas conocidas para evaluar al estudiante.
 ```bash
 uv run python -m src.data.export_eval
 ```
-* **Qué hace**: Utiliza un algoritmo de *Reservoir Sampling* de un solo paso de lectura para extraer muestras aleatorias deterministas para evaluación (`eval_dev_1k`, `eval_test_1k`, etc.) con un uso de memoria de menos de 10 MB. Cada registro lista todas las respuestas válidas conocidas (`known_outputs`) asociadas al par para permitir un score preciso.
+* **Qué hace**: Utiliza *Reservoir Sampling* de un solo paso de lectura para extraer muestras aleatorias deterministas (`eval_dev_1k`, `eval_test_1k`, etc.) con bajo uso de memoria. Cada registro es mínimo y lista las respuestas válidas conocidas (`known_outputs`) asociadas al par.
+* **Tamaño completo**: En `evaluation_export.sizes`, usar `all` en lugar de un número para exportar todo el split (`eval_dev_all.jsonl`, `eval_test_all.jsonl`).
 
 ---
 
@@ -66,10 +67,10 @@ uv run python -m src.data.export_eval
 
 ```bash
 uv run python -m src.sft.prepare_train_eval_data \
-  --train-input datasets/processed/sft_clean_train.jsonl \
-  --eval-input datasets/processed/sft_clean_dev.jsonl \
-  --train-output artifacts/data/sft_clean_train_sample_8000.jsonl \
-  --eval-output artifacts/data/sft_clean_dev_sample_2000.jsonl \
+  --train-input datasets/processed/recipes_train.jsonl \
+  --eval-input datasets/processed/recipes_dev.jsonl \
+  --train-output artifacts/data/recipes_train_sample_8000.jsonl \
+  --eval-output artifacts/data/recipes_dev_sample_2000.jsonl \
   --train-sample-size 8000 \
   --eval-sample-size 2000 \
   --seed 42
@@ -87,8 +88,8 @@ uv run python -m src.data.export_eval
 
 ```bash
 uv run python -m src.sft.create_colab_zip \
-  --train-file artifacts/data/sft_clean_train_sample_8000.jsonl \
-  --eval-file artifacts/data/sft_clean_dev_sample_2000.jsonl \
+  --train-file artifacts/data/recipes_train_sample_8000.jsonl \
+  --eval-file artifacts/data/recipes_dev_sample_2000.jsonl \
   --output-path artifacts/colab/llm-craft-sft-colab.zip
 ```
 
@@ -105,8 +106,8 @@ En Colab, subir el zip y descomprimirlo:
 
 ```bash
 uv run python -m src.sft.train \
-  --train-file artifacts/data/sft_clean_train_sample_8000.jsonl \
-  --eval-file artifacts/data/sft_clean_dev_sample_2000.jsonl \
+  --train-file artifacts/data/recipes_train_sample_8000.jsonl \
+  --eval-file artifacts/data/recipes_dev_sample_2000.jsonl \
   --output-dir artifacts/sft/smollm2-clean-lora \
   --model-name HuggingFaceTB/SmolLM2-135M-Instruct \
   --lora-mode lora \

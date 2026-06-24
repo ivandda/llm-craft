@@ -16,10 +16,17 @@ from transformers import (
     set_seed,
 )
 
+DEFAULT_PROMPT_TEMPLATE = (
+    "Given two concepts, combine them into one resulting concept.\n\n"
+    "Concept A: {input_a}\n"
+    "Concept B: {input_b}\n\n"
+    "Return only the resulting concept."
+)
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Run reproducible SFT with LoRA or QLoRA on a conversational JSONL dataset."
+        description="Run reproducible SFT with LoRA or QLoRA on a recipe JSONL dataset."
     )
     parser.add_argument(
         "--model-name",
@@ -28,13 +35,13 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--train-file",
-        default="artifacts/data/sft_clean_train_sample_8000.jsonl",
-        help="Training JSONL file with `messages` records.",
+        default="artifacts/data/recipes_train_sample_8000.jsonl",
+        help="Training JSONL file with recipe records or legacy `messages` records.",
     )
     parser.add_argument(
         "--eval-file",
         default=None,
-        help="Optional evaluation JSONL file with the same format.",
+        help="Optional recipe evaluation JSONL file with the same format.",
     )
     parser.add_argument(
         "--output-dir",
@@ -49,6 +56,11 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--max-length", type=int, default=256)
+    parser.add_argument(
+        "--prompt-template",
+        default=DEFAULT_PROMPT_TEMPLATE,
+        help="Runtime prompt template for records with input_a/input_b.",
+    )
     parser.add_argument("--learning-rate", type=float, default=1e-4)
     parser.add_argument("--num-train-epochs", type=float, default=1.0)
     parser.add_argument(
@@ -100,44 +112,90 @@ def split_messages(messages: list[dict[str, Any]]) -> tuple[list[dict[str, Any]]
     return prompt_messages, assistant_message
 
 
-def build_tokenized_dataset(dataset, tokenizer, max_length: int):
-    def preprocess(example: dict[str, Any]) -> dict[str, Any]:
-        prompt_messages, assistant_message = split_messages(example["messages"])
+def recipe_outputs(example: dict[str, Any]) -> list[str]:
+    if example.get("output"):
+        return [example["output"]]
+    outputs = example.get("outputs") or example.get("known_outputs")
+    if isinstance(outputs, list):
+        return [output for output in outputs if output]
+    raise ValueError("Recipe rows must contain `output`, `outputs`, or `known_outputs`.")
 
-        prompt_text = tokenizer.apply_chat_template(
-            prompt_messages,
-            tokenize=False,
-            add_generation_prompt=True,
-        )
 
-        assistant_text = assistant_message["content"]
-        if tokenizer.eos_token:
-            full_text = prompt_text + assistant_text + tokenizer.eos_token
-        else:
-            full_text = prompt_text + assistant_text
+def render_recipe_prompt(input_a: str, input_b: str, prompt_template: str, tokenizer: Any) -> str:
+    prompt_content = prompt_template.format(input_a=input_a, input_b=input_b)
+    return tokenizer.apply_chat_template(
+        [{"role": "user", "content": prompt_content}],
+        tokenize=False,
+        add_generation_prompt=True,
+    )
 
-        prompt_ids = tokenizer(prompt_text, add_special_tokens=False)["input_ids"]
-        tokenized = tokenizer(
-            full_text,
-            add_special_tokens=False,
-            truncation=True,
-            max_length=max_length,
-        )
 
-        labels = list(tokenized["input_ids"])
-        prompt_length = min(len(prompt_ids), len(labels))
-        labels[:prompt_length] = [-100] * prompt_length
+def tokenized_example(prompt_text: str, assistant_text: str, tokenizer: Any, max_length: int) -> dict[str, Any]:
+    if tokenizer.eos_token:
+        full_text = prompt_text + assistant_text + tokenizer.eos_token
+    else:
+        full_text = prompt_text + assistant_text
 
-        return {
-            "input_ids": tokenized["input_ids"],
-            "attention_mask": tokenized["attention_mask"],
-            "labels": labels,
+    prompt_ids = tokenizer(prompt_text, add_special_tokens=False)["input_ids"]
+    tokenized = tokenizer(
+        full_text,
+        add_special_tokens=False,
+        truncation=True,
+        max_length=max_length,
+    )
+
+    labels = list(tokenized["input_ids"])
+    prompt_length = min(len(prompt_ids), len(labels))
+    labels[:prompt_length] = [-100] * prompt_length
+
+    return {
+        "input_ids": tokenized["input_ids"],
+        "attention_mask": tokenized["attention_mask"],
+        "labels": labels,
+    }
+
+
+def build_tokenized_dataset(dataset, tokenizer, max_length: int, prompt_template: str = DEFAULT_PROMPT_TEMPLATE):
+    def preprocess(batch: dict[str, list[Any]]) -> dict[str, list[Any]]:
+        tokenized_rows: dict[str, list[Any]] = {
+            "input_ids": [],
+            "attention_mask": [],
+            "labels": [],
         }
+        batch_size = len(next(iter(batch.values()))) if batch else 0
+
+        for index in range(batch_size):
+            example = {key: values[index] for key, values in batch.items()}
+            if example.get("messages"):
+                prompt_messages, assistant_message = split_messages(example["messages"])
+                prompt_text = tokenizer.apply_chat_template(
+                    prompt_messages,
+                    tokenize=False,
+                    add_generation_prompt=True,
+                )
+                targets = [assistant_message["content"]]
+            else:
+                prompt_text = render_recipe_prompt(
+                    input_a=example.get("input_a", ""),
+                    input_b=example.get("input_b", ""),
+                    prompt_template=prompt_template,
+                    tokenizer=tokenizer,
+                )
+                targets = recipe_outputs(example)
+
+            for target in targets:
+                row = tokenized_example(prompt_text, target, tokenizer, max_length)
+                tokenized_rows["input_ids"].append(row["input_ids"])
+                tokenized_rows["attention_mask"].append(row["attention_mask"])
+                tokenized_rows["labels"].append(row["labels"])
+
+        return tokenized_rows
 
     tokenized = dataset.map(
         preprocess,
+        batched=True,
         remove_columns=dataset.column_names,
-        desc="Tokenizing conversational SFT data",
+        desc="Tokenizing recipe SFT data",
     )
 
     return tokenized.filter(
@@ -269,10 +327,10 @@ def main() -> None:
         data_files["eval"] = args.eval_file
 
     raw_datasets = load_dataset("json", data_files=data_files)
-    train_dataset = build_tokenized_dataset(raw_datasets["train"], tokenizer, args.max_length)
+    train_dataset = build_tokenized_dataset(raw_datasets["train"], tokenizer, args.max_length, args.prompt_template)
     eval_dataset = None
     if args.eval_file:
-        eval_dataset = build_tokenized_dataset(raw_datasets["eval"], tokenizer, args.max_length)
+        eval_dataset = build_tokenized_dataset(raw_datasets["eval"], tokenizer, args.max_length, args.prompt_template)
 
     training_args = build_training_args(args, dtype, eval_dataset is not None)
     save_run_config(args)

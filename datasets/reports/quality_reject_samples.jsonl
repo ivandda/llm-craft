@@ -1,0 +1,500 @@
+{"input_a": "inside", "input_b": "residential", "output": "home", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "fire", "input_b": "flight", "output": "rocket", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "flour", "input_b": "pot of gold", "output": "leprechaun", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "grocery store", "input_b": "sailor jupiter", "output": "sailor venus", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "colder", "input_b": "crafting", "output": "crafting table", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "corn", "input_b": "occur", "output": "popcorn", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "blunt", "input_b": "blunt", "output": "sharp", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "claymore", "input_b": "swamp thing", "output": "clay thing", "source": "ericlewis_train", "reason": "input_b:gerund_phrase"}
+{"input_a": "everyday", "input_b": "lord of the fries", "output": "happy", "source": "ericlewis_train", "reason": "input_b:too_many_words"}
+{"input_a": "muddy road", "input_b": "wind", "output": "dust", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "apple", "input_b": "treasure", "output": "golden apple", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "boat", "input_b": "file", "output": "ship", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "ice age", "input_b": "skidmark", "output": "mammoth", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "balboa", "input_b": "joker", "output": "batman", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "diddy kong racing", "input_b": "trump tower", "output": "diddy trump racing", "source": "ericlewis_train", "reason": "input_a:gerund_phrase"}
+{"input_a": "closely", "input_b": "picture", "output": "photograph", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "great", "input_b": "straight", "output": "awesome", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "fingers", "input_b": "shouting", "output": "rock", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "coldest", "input_b": "crafting", "output": "ice", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "air dragon", "input_b": "rain", "output": "rainbow", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "marathon", "input_b": "tea", "output": "marteathon", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "drowned cowboy", "input_b": "smoke", "output": "cowboy", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "muddy teabag", "input_b": "rain", "output": "muddy teabag", "source": "ericlewis_train", "reason": "identity"}
+{"input_a": "asset", "input_b": "coalition", "output": "alliance", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "beautiful", "input_b": "portion", "output": "beauty", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "diamond", "input_b": "swamp thing", "output": "swamp diamond", "source": "ericlewis_train", "reason": "input_b:gerund_phrase"}
+{"input_a": "racist", "input_b": "trip", "output": "fall", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "hot spring", "input_b": "marsh", "output": "mud", "source": "ericlewis_train", "reason": "input_a:gerund_phrase"}
+{"input_a": "archaeologist", "input_b": "easter", "output": "easter island", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "anime", "input_b": "space cowboy", "output": "cowboy bebop", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "theatre", "input_b": "whale", "output": "moby dick", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "atlantis", "input_b": "engine", "output": "submarine", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "liar", "input_b": "wind", "output": "politician", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "momentum", "input_b": "target", "output": "bullet", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "drug", "input_b": "survey", "output": "poll", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "crafting", "input_b": "tinkerbell", "output": "fairy", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "always", "input_b": "falling", "output": "waterfall", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "twin towers", "input_b": "twin towers", "output": "twin towers", "source": "ericlewis_train", "reason": "identity"}
+{"input_a": "divorced", "input_b": "sometime", "output": "ex-wife", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "wave", "input_b": "wig", "output": "surfer", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "crash", "input_b": "cuckoo clock", "output": "time", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "dust", "input_b": "dusty mario kart 8", "output": "dusty mario kart 8", "source": "ericlewis_train", "reason": "input_b:too_many_words"}
+{"input_a": "bomb", "input_b": "chart", "output": "pirate", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "normal", "input_b": "roadkill", "output": "flat", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "edge", "input_b": "wrapped", "output": "present", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "clue", "input_b": "empty", "output": "hint", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "eden", "input_b": "merman", "output": "mermaid", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "green joker", "input_b": "windsurfer", "output": "green joker", "source": "ericlewis_train", "reason": "identity"}
+{"input_a": "crash", "input_b": "tesla", "output": "tesla coil", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "always", "input_b": "bonus", "output": "forever", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "battle", "input_b": "employ", "output": "war", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "diddy nuggets", "input_b": "werebunny", "output": "diddy nuggets", "source": "ericlewis_train", "reason": "identity"}
+{"input_a": "appreciation", "input_b": "hole", "output": "acknowledgement", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "balance", "input_b": "crafting", "output": "alchemy", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "air force", "input_b": "latin", "output": "air force one", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "anxious", "input_b": "plate", "output": "dish", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "smooth tsunami", "input_b": "wind", "output": "smooth wind", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "mirror", "input_b": "truth", "output": "lie", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "indian", "input_b": "prescription", "output": "medicine", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "fishing boat", "input_b": "flying fish", "output": "flying boat", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "ruins", "input_b": "shock", "output": "earthquake", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "always", "input_b": "masterpiece", "output": "forever", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "milestone", "input_b": "mud", "output": "brick", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "roast duck", "input_b": "wind", "output": "flying roast duck", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "engine", "input_b": "milestone", "output": "car", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "canyon", "input_b": "crime", "output": "robbery", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "friday the 13th", "input_b": "friday the 13th", "output": "jason", "source": "ericlewis_train", "reason": "input_a:has_digit"}
+{"input_a": "recruit", "input_b": "shell", "output": "soldier", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "donkey kong country 2", "input_b": "gnomad", "output": "donkey kong country 2: diddy's kong quest", "source": "ericlewis_train", "reason": "input_a:too_many_words"}
+{"input_a": "place", "input_b": "regrets", "output": "graveyard", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "hawaii", "input_b": "marsh", "output": "luau", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "bpchoppertuna", "input_b": "goth", "output": "emo", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "ice age", "input_b": "tsunami", "output": "iceberg", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "cleaning robot", "input_b": "steam robot", "output": "cleaning steam robot", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "crossing", "input_b": "saved", "output": "crossed", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "jacket", "input_b": "worse", "output": "jacket", "source": "ericlewis_train", "reason": "identity"}
+{"input_a": "micro", "input_b": "rice", "output": "sushi", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "not", "input_b": "scheme", "output": "dream", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "laughter", "input_b": "rescue", "output": "hero", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "caramelldansen", "input_b": "monk", "output": "monkamelldansen", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "assured", "input_b": "towers", "output": "twin towers", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "date", "input_b": "ocean", "output": "tide", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "micro", "input_b": "shock", "output": "microshock", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "lawn", "input_b": "mudweed", "output": "lawnmower", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "egg", "input_b": "strike", "output": "omelette", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "bolder", "input_b": "protester", "output": "riot", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "cough syrup", "input_b": "wine", "output": "cough wine", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "hair", "input_b": "reaction", "output": "perm", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "shepherd", "input_b": "supernova", "output": "star", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "blackout", "input_b": "wisdom", "output": "darkness", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "swamp", "input_b": "warning", "output": "alligator", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "fungus", "input_b": "swamp", "output": "mushroom", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "bouquet", "input_b": "mud", "output": "lotus", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "scope", "input_b": "veteran", "output": "telescope", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "echo", "input_b": "invention", "output": "echo", "source": "ericlewis_train", "reason": "identity"}
+{"input_a": "banker", "input_b": "grandfathers", "output": "grandfather clock", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "grey", "input_b": "vitamin", "output": "hulk", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "survivor", "input_b": "time", "output": "evolution", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "magic", "input_b": "not", "output": "real", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "gingerbread shark", "input_b": "tsunami", "output": "gingerbread sharknado", "source": "ericlewis_train", "reason": "output:suspicious_suffix"}
+{"input_a": "photographer", "input_b": "wine", "output": "sommelier", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "cactus", "input_b": "geyser", "output": "prickly heat", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "clever", "input_b": "failure", "output": "success", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "sponsoring", "input_b": "syndrome", "output": "sponsorship", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "hearing", "input_b": "tested", "output": "exam", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "one", "input_b": "rice", "output": "two", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "monster truck", "input_b": "pirate ship", "output": "pirate truck", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "graphic", "input_b": "graphic", "output": "picture", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "plane", "input_b": "tornado", "output": "tornado", "source": "ericlewis_train", "reason": "input_b:suspicious_suffix"}
+{"input_a": "candy crush", "input_b": "row bears", "output": "candy crush saga", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "harem", "input_b": "tux", "output": "wedding", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "empty", "input_b": "pirate ship", "output": "ghost ship", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "clot", "input_b": "naked", "output": "emperor", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "swamp", "input_b": "wet t-shirt", "output": "swamp thing", "source": "ericlewis_train", "reason": "output:gerund_phrase"}
+{"input_a": "prince of air", "input_b": "water", "output": "prince of water", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "baking", "input_b": "saving", "output": "baking soda", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "fairytale", "input_b": "micro", "output": "fairy", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "sphinx", "input_b": "sushitic", "output": "sphinx", "source": "ericlewis_train", "reason": "identity"}
+{"input_a": "heaven", "input_b": "mortgage", "output": "foreclosure", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "beach house", "input_b": "fog", "output": "lighthouse", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "fire", "input_b": "sausage", "output": "hot dog", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "steam ranger", "input_b": "water", "output": "steam ranger", "source": "ericlewis_train", "reason": "identity"}
+{"input_a": "geysers", "input_b": "swamp", "output": "mud", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "accepted", "input_b": "conception", "output": "pregnancy", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "latin", "input_b": "vaccine", "output": "vaccine", "source": "ericlewis_train", "reason": "identity"}
+{"input_a": "disappear", "input_b": "leak", "output": "vanish", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "bun", "input_b": "flying fish", "output": "flying bun", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "dust", "input_b": "irish fog", "output": "smog", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "presidency", "input_b": "soap", "output": "impeachment", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "captain eo", "input_b": "wizard of oz", "output": "michael jackson", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "bitter", "input_b": "i", "output": "bittersweet", "source": "ericlewis_train", "reason": "input_b:short_token"}
+{"input_a": "milk", "input_b": "nero", "output": "cheese", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "elephant", "input_b": "snake", "output": "snake", "source": "ericlewis_train", "reason": "identity"}
+{"input_a": "animal", "input_b": "wings", "output": "pegasus", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "never", "input_b": "newspaper", "output": "old news", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "micro", "input_b": "sarcophagus", "output": "mummy", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "fallen", "input_b": "port", "output": "pirate", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "banking", "input_b": "rare", "output": "gold", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "latin", "input_b": "legend", "output": "rome", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "bikini bottom", "input_b": "santa", "output": "spongebob", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "ryan", "input_b": "wind", "output": "hurricane", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "cold", "input_b": "empty", "output": "space", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "graffiti", "input_b": "snowden", "output": "anonymous", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "mummy", "input_b": "something", "output": "bandage", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "mother rat fiction", "input_b": "sharknado 7: the 5th awakens", "output": "sharknado 7: the 5th awakens", "source": "ericlewis_train", "reason": "input_b:title_or_sentence_like"}
+{"input_a": "birdhouse", "input_b": "not", "output": "bird", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "underworld", "input_b": "volcano", "output": "hell", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "time", "input_b": "witches", "output": "witching hour", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "prince of fire", "input_b": "swamp", "output": "dragon", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "lava", "input_b": "mud dragon", "output": "dragon", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "engine", "input_b": "sky castle", "output": "airplane", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "gnome", "input_b": "mermaid", "output": "gnomad", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "fire", "input_b": "pneumatic", "output": "pneumatic", "source": "ericlewis_train", "reason": "identity"}
+{"input_a": "ice age", "input_b": "poltergeist", "output": "ice ghost", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "castle", "input_b": "sun", "output": "palace", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "loyal", "input_b": "mystery", "output": "dog", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "engine", "input_b": "hydraulics", "output": "crane", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "happiest", "input_b": "micro", "output": "microbe", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "freeze", "input_b": "lowered", "output": "frozen", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "granted", "input_b": "ours", "output": "grantedours", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "dengue", "input_b": "rain", "output": "mosquito", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "achieve", "input_b": "anniversary", "output": "achieveversary", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "hippie", "input_b": "spring break", "output": "hippie", "source": "ericlewis_train", "reason": "identity"}
+{"input_a": "flying hot dog", "input_b": "plant", "output": "tree", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "me", "input_b": "time", "output": "money", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "survey", "input_b": "symptoms", "output": "diagnosis", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "not", "input_b": "time travel", "output": "time", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "college", "input_b": "message", "output": "textbook", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "passion", "input_b": "platform 9 3/4", "output": "hogwarts", "source": "ericlewis_train", "reason": "input_b:too_many_words"}
+{"input_a": "caribou", "input_b": "lava", "output": "volcano", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "general", "input_b": "status", "output": "war", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "consistent", "input_b": "movement", "output": "progress", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "amber", "input_b": "sheep-o-scope", "output": "amber sheep", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "collection", "input_b": "tested", "output": "museum", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "burnt cowboy", "input_b": "wind", "output": "dust", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "maple flytrap", "input_b": "pork", "output": "nothing", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "bomb", "input_b": "starfish", "output": "nuclear bomb", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "exams", "input_b": "locks", "output": "school", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "desperate", "input_b": "oven", "output": "baked", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "cold tea", "input_b": "fog", "output": "ice", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "guide", "input_b": "time", "output": "history", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "poorer", "input_b": "ratings", "output": "tv", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "earth", "input_b": "rainbow smoke", "output": "rainbow", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "politics", "input_b": "shock", "output": "trump", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "cake", "input_b": "museum", "output": "art", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "sum", "input_b": "wrong", "output": "wrong", "source": "ericlewis_train", "reason": "identity"}
+{"input_a": "mind", "input_b": "web", "output": "spider", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "altar", "input_b": "water", "output": "wine", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "crocum", "input_b": "flowerpot", "output": "crocum pot", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "industrial revolution", "input_b": "wind", "output": "windmill", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "gym", "input_b": "mark", "output": "muscle", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "burnt steam", "input_b": "water", "output": "cloud", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "crash toasticoot", "input_b": "snake pie", "output": "crash bandicoot", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "dalek", "input_b": "jesus", "output": "exterminate", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "began", "input_b": "western", "output": "cowboy", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "skipping stone", "input_b": "water", "output": "ripple", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "theories", "input_b": "understanding", "output": "science", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "green dust", "input_b": "water", "output": "algae", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "command", "input_b": "hugging", "output": "hug", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "chocolate milk", "input_b": "marsh", "output": "chocolate marshmallow", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "psychology", "input_b": "you", "output": "psychology", "source": "ericlewis_train", "reason": "identity"}
+{"input_a": "carry", "input_b": "gathered", "output": "harvest", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "coffee", "input_b": "drunker", "output": "drunk", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "always", "input_b": "wizard", "output": "never", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "daisy", "input_b": "meteor train", "output": "flower", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "electric eel", "input_b": "truck", "output": "electric truck", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "citizen", "input_b": "pharmacy", "output": "drug dealer", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "ashamed", "input_b": "shadows", "output": "ghost", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "how", "input_b": "real", "output": "reality", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "sometime", "input_b": "supreme", "output": "court", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "crab", "input_b": "flypaper", "output": "crabstick", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "kalequake", "input_b": "sticky note", "output": "nothing", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "christmas", "input_b": "normal", "output": "christmas", "source": "ericlewis_train", "reason": "identity"}
+{"input_a": "fire", "input_b": "golf course", "output": "volcano", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "chemistry", "input_b": "fitness", "output": "chemical fitness", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "desert", "input_b": "wormhole", "output": "time travel", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "abandon", "input_b": "not", "output": "adopt", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "investing", "input_b": "lobby", "output": "politics", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "periscope", "input_b": "sandtrap", "output": "telescope", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "ghost rider on fire", "input_b": "water", "output": "steam", "source": "ericlewis_train", "reason": "input_a:too_many_words"}
+{"input_a": "mysteries", "input_b": "promises", "output": "religion", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "never", "input_b": "vote", "output": "democracy", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "artist", "input_b": "simple", "output": "picasso", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "crafting", "input_b": "metal", "output": "sword", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "tree", "input_b": "valentine", "output": "heart", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "prison break", "input_b": "swamp", "output": "alligator", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "crash", "input_b": "online", "output": "offline", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "lava", "input_b": "money tree", "output": "volcano", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "steam tsunami", "input_b": "volcano", "output": "earthquake", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "debt", "input_b": "far", "output": "farm", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "garden", "input_b": "peking duck", "output": "peking garden", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "fire", "input_b": "guns", "output": "bullets", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "buffet", "input_b": "never", "output": "all you can eat", "source": "ericlewis_train", "reason": "output:too_many_words"}
+{"input_a": "calculate", "input_b": "heel", "output": "calculator", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "flying car", "input_b": "flying truck", "output": "flying tractor", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "fact", "input_b": "fact", "output": "truth", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "minimal", "input_b": "test", "output": "exam", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "obol", "input_b": "stone", "output": "coin", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "copernicus", "input_b": "wizard", "output": "astronomer", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "cinderella", "input_b": "storm", "output": "fairy godmother", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "landslide", "input_b": "rainbow rocks", "output": "rainbow", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "camouflage", "input_b": "escape room", "output": "escape", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "landscape", "input_b": "report", "output": "news", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "always", "input_b": "demon", "output": "angel", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "crash", "input_b": "hulk", "output": "smash", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "fires", "input_b": "offering", "output": "sacrifice", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "car", "input_b": "peace", "output": "parking", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "marked", "input_b": "old", "output": "ancient", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "no", "input_b": "suspect", "output": "innocent", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "river styx", "input_b": "wind", "output": "boreas", "source": "ericlewis_train", "reason": "input_a:vowelless_token"}
+{"input_a": "poison ivy", "input_b": "valkyrie", "output": "poison valkyrie", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "mermaid", "input_b": "mudweed", "output": "seaweed", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "microwave", "input_b": "santa claus", "output": "santa claus", "source": "ericlewis_train", "reason": "identity"}
+{"input_a": "fog", "input_b": "poltergeist", "output": "ghost", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "always", "input_b": "death", "output": "taxes", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "ghost", "input_b": "trunk", "output": "tree", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "cactus bowl", "input_b": "trashcan", "output": "cactus", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "sad", "input_b": "tomorrow", "output": "yesterday", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "crafting", "input_b": "royal", "output": "king", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "pope francis", "input_b": "sand", "output": "pope sand", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "home", "input_b": "time", "output": "house", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "creation", "input_b": "wanted", "output": "evolution", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "genie", "input_b": "rocky mountain reflection", "output": "mirror", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "drum", "input_b": "normal", "output": "drummer", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "dog", "input_b": "plantea", "output": "dogwood", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "braking wind", "input_b": "wave", "output": "surf", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "time", "input_b": "tv", "output": "netflix", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "prison", "input_b": "settle", "output": "settlement", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "my little pony", "input_b": "wave", "output": "sea pony", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "ozymandias", "input_b": "time", "output": "ruins", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "geothermal plant", "input_b": "reef", "output": "coral", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "campus", "input_b": "slave", "output": "slavery", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "alliances", "input_b": "list", "output": "peace", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "space ship", "input_b": "steam", "output": "time machine", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "marsh", "input_b": "nuclear summer", "output": "swamp", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "hellhound", "input_b": "one", "output": "hellhound", "source": "ericlewis_train", "reason": "identity"}
+{"input_a": "joy", "input_b": "short", "output": "joyride", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "country", "input_b": "cry", "output": "patriot", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "movie", "input_b": "raise", "output": "raising arizona", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "gentlemen", "input_b": "profit", "output": "business", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "cough syrup", "input_b": "patriot", "output": "american", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "corridor", "input_b": "critics", "output": "art", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "crash", "input_b": "tired", "output": "sleep", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "latin", "input_b": "origami", "output": "paper", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "animal", "input_b": "kick", "output": "kangaroo", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "eraser", "input_b": "painting", "output": "blank canvas", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "cyclops", "input_b": "star tempest", "output": "cyclops", "source": "ericlewis_train", "reason": "identity"}
+{"input_a": "alone", "input_b": "vote", "output": "election", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "prevent", "input_b": "revenge", "output": "forgiveness", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "past", "input_b": "tool", "output": "history", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "momus", "input_b": "signal", "output": "momus", "source": "ericlewis_train", "reason": "identity"}
+{"input_a": "never", "input_b": "pope", "output": "nope", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "pelican", "input_b": "wave", "output": "surf", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "donkey kong 64", "input_b": "firebird", "output": "donkey kong country 3", "source": "ericlewis_train", "reason": "input_a:has_digit"}
+{"input_a": "animal", "input_b": "pockets", "output": "kangaroo", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "editor", "input_b": "never", "output": "always", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "field", "input_b": "wind", "output": "crop", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "sandstorm", "input_b": "surfing cow", "output": "dust", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "host", "input_b": "pause", "output": "toast", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "gift", "input_b": "holiday", "output": "present", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "crocodile", "input_b": "fire tornado", "output": "fire crocodile", "source": "ericlewis_train", "reason": "input_b:suspicious_suffix"}
+{"input_a": "cyber monday", "input_b": "star wars", "output": "cyber wars", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "one", "input_b": "open", "output": "door", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "poison ivy", "input_b": "rice pudding", "output": "poison", "source": "ericlewis_train", "reason": "input_b:gerund_phrase"}
+{"input_a": "mudslide", "input_b": "mudweed", "output": "mud", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "mask", "input_b": "output", "output": "smile", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "reasonable", "input_b": "today", "output": "tomorrow", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "emotions", "input_b": "micro", "output": "microemotions", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "enduring", "input_b": "remember", "output": "legend", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "hot spring", "input_b": "lava", "output": "volcano", "source": "ericlewis_train", "reason": "input_a:gerund_phrase"}
+{"input_a": "titanado", "input_b": "vulcanology", "output": "nothing", "source": "ericlewis_train", "reason": "input_a:suspicious_suffix"}
+{"input_a": "investing", "input_b": "physics", "output": "finance", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "lava", "input_b": "muddy yoshi", "output": "yoshi", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "borrowed", "input_b": "prints", "output": "library", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "mud sail", "input_b": "wind", "output": "boat", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "dune", "input_b": "vulcan flytrap", "output": "sandworm", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "conference", "input_b": "failure", "output": "conference", "source": "ericlewis_train", "reason": "identity"}
+{"input_a": "statue", "input_b": "toilet", "output": "david", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "dyson", "input_b": "sonar", "output": "vacuum", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "december", "input_b": "tip", "output": "christmas", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "adequate", "input_b": "sensitive", "output": "adequately sensitive", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "always", "input_b": "banana bread", "output": "forever", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "recycle", "input_b": "steam", "output": "energy", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "software", "input_b": "tipping", "output": "piracy", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "grandfathers", "input_b": "plant", "output": "tree", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "normal", "input_b": "painting", "output": "art", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "jasmine", "input_b": "tsunami", "output": "princess", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "empty", "input_b": "woman", "output": "pregnant", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "coconut", "input_b": "p.u.", "output": "pina colada", "source": "ericlewis_train", "reason": "input_b:short_token"}
+{"input_a": "arrow", "input_b": "latin", "output": "cupid", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "fact", "input_b": "one", "output": "fact", "source": "ericlewis_train", "reason": "identity"}
+{"input_a": "dust", "input_b": "pickle rick", "output": "pickle rick", "source": "ericlewis_train", "reason": "identity"}
+{"input_a": "always", "input_b": "wait", "output": "forever", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "bicycle", "input_b": "stay", "output": "hotel", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "punwich", "input_b": "skid", "output": "punskid", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "car park", "input_b": "pomegranate", "output": "parking lot", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "diagnosis", "input_b": "small", "output": "diagnosis", "source": "ericlewis_train", "reason": "identity"}
+{"input_a": "eye", "input_b": "huge", "output": "giant", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "avalanche", "input_b": "sausage", "output": "bratwurst", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "issues", "input_b": "organize", "output": "solutions", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "alone", "input_b": "group", "output": "crowd", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "ransom", "input_b": "snot", "output": "kidnapper", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "sewage", "input_b": "simcity", "output": "pollution", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "injured", "input_b": "yellow", "output": "jaundice", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "crash", "input_b": "energy", "output": "explosion", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "balloon", "input_b": "soggy toast", "output": "soggy balloon", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "mirror", "input_b": "news", "output": "fake news", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "creature", "input_b": "recall", "output": "memory", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "mine", "input_b": "shrugging", "output": "mineshrug", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "presidency", "input_b": "tractor beam", "output": "trump", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "firedozer", "input_b": "swamp", "output": "firedozer", "source": "ericlewis_train", "reason": "identity"}
+{"input_a": "bouncy stone", "input_b": "stone", "output": "bouncy stone", "source": "ericlewis_train", "reason": "identity"}
+{"input_a": "mud", "input_b": "muddy siren", "output": "muddy siren", "source": "ericlewis_train", "reason": "identity"}
+{"input_a": "alexander graham bell", "input_b": "mortgage", "output": "telephone", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "sharp", "input_b": "thief", "output": "cutpurse", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "always", "input_b": "ceramic", "output": "pottery", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "professor", "input_b": "sigh", "output": "exam", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "king", "input_b": "never", "output": "forever", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "fire", "input_b": "lemon tree", "output": "lemon", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "classroom", "input_b": "proof", "output": "exam", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "lemur", "input_b": "water", "output": "lemur", "source": "ericlewis_train", "reason": "identity"}
+{"input_a": "dust", "input_b": "sealion", "output": "dustbin", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "floor", "input_b": "slowly", "output": "floor", "source": "ericlewis_train", "reason": "identity"}
+{"input_a": "federal", "input_b": "stop", "output": "feds", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "classify", "input_b": "ready", "output": "prepared", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "fire", "input_b": "wet tape", "output": "fire tape", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "moosemud", "input_b": "water", "output": "moosemud", "source": "ericlewis_train", "reason": "identity"}
+{"input_a": "resign", "input_b": "workout", "output": "retirement", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "micro", "input_b": "sun", "output": "solar", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "hotter lava", "input_b": "stone", "output": "obsidian", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "crawl", "input_b": "fruit", "output": "banana", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "foundations", "input_b": "tall", "output": "skyscraper", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "coke", "input_b": "explosion", "output": "diet coke", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "anxiety", "input_b": "sole", "output": "soul", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "coral", "input_b": "wind turbine", "output": "reef", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "fire pluto", "input_b": "trombone", "output": "satan", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "engine", "input_b": "pea soup", "output": "pea soup", "source": "ericlewis_train", "reason": "identity"}
+{"input_a": "ass", "input_b": "fog", "output": "mist", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "midas", "input_b": "space stoner", "output": "gold", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "blackpeace", "input_b": "mickey", "output": "disney", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "prickle", "input_b": "weed", "output": "thistle", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "palace", "input_b": "tipi", "output": "taj mahal", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "moana", "input_b": "pork", "output": "pig", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "plumber", "input_b": "spaceship", "output": "mario", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "spongecavewoman", "input_b": "trumpkin", "output": "spongecavewoman", "source": "ericlewis_train", "reason": "identity"}
+{"input_a": "bomb", "input_b": "crabomber", "output": "crab", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "contract", "input_b": "fire", "output": "burn", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "duckweed", "input_b": "goat", "output": "goatweed", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "giant dandelion", "input_b": "pollen", "output": "giant bee", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "alone", "input_b": "cutest", "output": "lonely", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "newton", "input_b": "wave", "output": "tsunami", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "narcissus", "input_b": "not", "output": "narcissism", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "interest", "input_b": "raven", "output": "poe", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "muddy teacup", "input_b": "water", "output": "clean teacup", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "better", "input_b": "escape", "output": "prison", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "crash", "input_b": "glasses", "output": "nerd", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "centuries", "input_b": "drowned", "output": "atlantis", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "rope", "input_b": "shouting", "output": "tug of war", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "known", "input_b": "poll", "output": "politics", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "fire", "input_b": "losses", "output": "profit", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "pound", "input_b": "presentation", "output": "pound cake", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "bus", "input_b": "bus on fire", "output": "bus on fire", "source": "ericlewis_train", "reason": "identity"}
+{"input_a": "calendar", "input_b": "february", "output": "leap year", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "anxiety", "input_b": "employee", "output": "workaholic", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "lily", "input_b": "pirate", "output": "jack sparrow", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "flying cowboy", "input_b": "sand flea", "output": "nothing", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "country", "input_b": "latin", "output": "america", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "sunrise", "input_b": "volcano", "output": "sunset", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "dirty martini", "input_b": "dust", "output": "dirty dusty martini", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "crafting", "input_b": "fire", "output": "alchemy", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "action", "input_b": "sadder", "output": "reaction", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "author", "input_b": "billboard", "output": "advertisement", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "astronaut", "input_b": "dwarf", "output": "little green man", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "sandboard", "input_b": "snow tank", "output": "sand tank", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "crocodile", "input_b": "marsh", "output": "alligator", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "amphora", "input_b": "muddy teapot", "output": "muddy amphora", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "chaff", "input_b": "smoke", "output": "fire", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "dust", "input_b": "mario kart 8 deluxe", "output": "dusty mario", "source": "ericlewis_train", "reason": "input_b:too_many_words"}
+{"input_a": "daisy", "input_b": "nap", "output": "sleep", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "not", "input_b": "silver", "output": "gold", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "crayon", "input_b": "tornado", "output": "crayonado", "source": "ericlewis_train", "reason": "input_b:suspicious_suffix"}
+{"input_a": "anemone", "input_b": "lady liberty", "output": "statue of liberty", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "date", "input_b": "date", "output": "fruit", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "ketchup", "input_b": "smoke", "output": "barbecue", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "samurai", "input_b": "tazer", "output": "ronin", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "lava", "input_b": "piranha plant", "output": "piranha", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "hay fever", "input_b": "prayer", "output": "sneeze", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "glass", "input_b": "gumbo", "output": "glassbo", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "biology", "input_b": "missile", "output": "virus", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "graph", "input_b": "never", "output": "forever", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "lava", "input_b": "potato chip", "output": "salsa", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "designer", "input_b": "youth", "output": "teen", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "lawn", "input_b": "stock", "output": "market", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "milk", "input_b": "tiki carnival", "output": "tiki milk", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "burned", "input_b": "joint", "output": "cigarette", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "rubber", "input_b": "seaweed", "output": "bouncy castle", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "koopa", "input_b": "smoke", "output": "bowser", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "deficit", "input_b": "garage", "output": "sale", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "crash", "input_b": "silence", "output": "crash", "source": "ericlewis_train", "reason": "identity"}
+{"input_a": "fish", "input_b": "muddy trout", "output": "muddy fish", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "destruction", "input_b": "wind", "output": "tornado", "source": "ericlewis_train", "reason": "output:suspicious_suffix"}
+{"input_a": "clean troll", "input_b": "crescent", "output": "moon", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "micro", "input_b": "yeti", "output": "microbe", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "hoot", "input_b": "minecraft", "output": "owl", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "engine", "input_b": "trap", "output": "trapdoor", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "mayan", "input_b": "stone", "output": "pyramid", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "doughnut", "input_b": "experiment", "output": "hole", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "jet", "input_b": "sales", "output": "airplane", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "disks", "input_b": "division", "output": "pi", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "lava", "input_b": "soggy fries", "output": "volcano", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "micro", "input_b": "steamboat", "output": "steamboat", "source": "ericlewis_train", "reason": "identity"}
+{"input_a": "engineer", "input_b": "immigration", "output": "alien", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "dust", "input_b": "star trek", "output": "tribble", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "quarterback", "input_b": "survived", "output": "survived", "source": "ericlewis_train", "reason": "identity"}
+{"input_a": "investigate", "input_b": "want", "output": "research", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "drum", "input_b": "sigh", "output": "drumroll", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "fire truck", "input_b": "sand", "output": "sand truck", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "pigcasso", "input_b": "tense", "output": "pigcasso", "source": "ericlewis_train", "reason": "identity"}
+{"input_a": "chocolate lava", "input_b": "tsunami", "output": "chocolate tsunami", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "forgiven", "input_b": "original", "output": "forgotten", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "judging", "input_b": "mine", "output": "jury", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "latin", "input_b": "weather", "output": "climate", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "consumer", "input_b": "pocket", "output": "thief", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "animal", "input_b": "winter", "output": "bear", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "ad", "input_b": "continuous", "output": "advertising", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "black hole", "input_b": "empty", "output": "universe", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "salt water", "input_b": "steam", "output": "brine", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "apologize", "input_b": "lonelier", "output": "apologize", "source": "ericlewis_train", "reason": "identity"}
+{"input_a": "crafting", "input_b": "crop duster", "output": "farm", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "firekraken", "input_b": "fog", "output": "fire", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "pigasus", "input_b": "plant", "output": "pigweed", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "emperor’s new clothes", "input_b": "heal smash", "output": "emperor’s new clothes", "source": "ericlewis_train", "reason": "input_a:too_many_words"}
+{"input_a": "eaten", "input_b": "hockey", "output": "puck", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "apple pie", "input_b": "single", "output": "divorce", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "mermaid", "input_b": "poseidon", "output": "ariel", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "debt", "input_b": "patent", "output": "monopoly", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "plantea", "input_b": "pluto", "output": "pluto", "source": "ericlewis_train", "reason": "identity"}
+{"input_a": "latin", "input_b": "phobia", "output": "claustrophobia", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "hour", "input_b": "receiving", "output": "gift", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "quickly", "input_b": "surprise", "output": "ambush", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "four", "input_b": "supply", "output": "demand", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "james bond", "input_b": "raven", "output": "raven bond", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "scholar", "input_b": "whip", "output": "teacher", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "platform 9 3/4", "input_b": "sponge", "output": "spongebob", "source": "ericlewis_train", "reason": "input_a:too_many_words"}
+{"input_a": "depression", "input_b": "tear", "output": "rain", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "bacteria", "input_b": "holier", "output": "holy", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "pufferfish", "input_b": "tiger lily", "output": "pufferfish", "source": "ericlewis_train", "reason": "identity"}
+{"input_a": "mechanic", "input_b": "sister", "output": "mechanic", "source": "ericlewis_train", "reason": "identity"}
+{"input_a": "number", "input_b": "shelter", "output": "house", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "assisted", "input_b": "scared", "output": "assassin", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "brandy", "input_b": "swamp", "output": "moonshine", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "black gold", "input_b": "spongepigeon", "output": "spongebob squarepants", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "fire breathing dragon", "input_b": "fire fire trap", "output": "fire fire fire fire fire fire fire fire fire fire fire fire fire fire fire fire fire fire fire fire", "source": "ericlewis_train", "reason": "input_a:gerund_phrase"}
+{"input_a": "rain", "input_b": "satan", "output": "acid rain", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "alone", "input_b": "that", "output": "lonely", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "mudway", "input_b": "ocean", "output": "mudway", "source": "ericlewis_train", "reason": "identity"}
+{"input_a": "bugs", "input_b": "hall", "output": "bug hall", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "fresher", "input_b": "ipad", "output": "freshpad", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "garden", "input_b": "tail", "output": "mermaid", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
+{"input_a": "navigation", "input_b": "wind", "output": "sail", "source": "ericlewis_train", "reason": "untrusted_source_vocab"}
