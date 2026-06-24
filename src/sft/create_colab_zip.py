@@ -5,8 +5,8 @@ from pathlib import Path
 
 
 DEFAULT_OUTPUT_PATH = "artifacts/colab/llm-craft-sft-colab.zip"
-DEFAULT_TRAIN_FILE = "artifacts/data/sft_clean_train_sample_8000.jsonl"
-DEFAULT_EVAL_FILE = "artifacts/data/sft_clean_dev_sample_2000.jsonl"
+DEFAULT_TRAIN_FILE = "artifacts/data/recipes_train_sample_8000.jsonl"
+DEFAULT_EVAL_FILE = "artifacts/data/recipes_dev_sample_2000.jsonl"
 DEFAULT_STRUCTURED_EVAL_FILE = "datasets/processed/eval_dev_1k.jsonl"
 
 EXCLUDED_DIRS = {"__pycache__", ".pytest_cache", ".ruff_cache"}

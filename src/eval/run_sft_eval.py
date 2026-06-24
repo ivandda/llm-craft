@@ -86,9 +86,10 @@ def iter_eval_records(eval_file: str, limit: int | None = None) -> Iterable[dict
 
 def build_output_record(eval_record: dict[str, Any], prediction: str) -> dict[str, Any]:
     known_outputs = eval_record.get("known_outputs", [])
+    canonical_output = eval_record.get("canonical_output") or (known_outputs[0] if known_outputs else "")
     evaluation = evaluate_prediction(
         prediction=prediction,
-        canonical_output=eval_record.get("canonical_output", ""),
+        canonical_output=canonical_output,
         known_outputs=known_outputs,
     )
 
@@ -97,7 +98,7 @@ def build_output_record(eval_record: dict[str, Any], prediction: str) -> dict[st
         "input_a": eval_record.get("input_a"),
         "input_b": eval_record.get("input_b"),
         "prediction": prediction,
-        "canonical_output": eval_record.get("canonical_output"),
+        "canonical_output": canonical_output,
         "known_outputs": known_outputs,
         "exact_canonical_match": evaluation.exact_canonical_match,
         "known_output_match": evaluation.known_output_match,

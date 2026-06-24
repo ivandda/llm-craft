@@ -13,6 +13,8 @@ def stable_bucket(value: Tuple[str, str], modulo: int = 10_000) -> int:
 
 # We can import hashlib inside the script
 import hashlib
+from collections import Counter
+from src.data.quality import normalize_concept, quality_config_from_dict, recipe_quality_reason
 
 def assign_split(pair_key: Tuple[str, str], split_ratios: Dict[str, float]) -> str:
     # Modulo-based splitting using pair keys
@@ -50,12 +52,17 @@ def is_garbage_concept(text: str) -> bool:
         return True
     return False
 
+
+def source_matches(source: str, names: Set[str], prefixes: Set[str]) -> bool:
+    return source in names or any(source.startswith(prefix) for prefix in prefixes)
+
 def main():
     base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
     config_file = os.path.join(base_dir, "configs", "pipeline_config.yaml")
     input_file = os.path.join(base_dir, "datasets", "processed", "recipe_observations_v0.jsonl")
     output_file = os.path.join(base_dir, "datasets", "processed", "recipe_canonical_v0.jsonl")
     report_file = os.path.join(base_dir, "datasets", "reports", "clean_metrics.json")
+    reject_samples_file = os.path.join(base_dir, "datasets", "reports", "quality_reject_samples.jsonl")
 
     # Load configuration
     if os.path.exists(config_file):
@@ -72,13 +79,38 @@ def main():
     clean_cfg = config.get("cleaning", {})
     lowercase_all = clean_cfg.get("lowercase_all", True)
     filter_garbage = clean_cfg.get("filter_garbage", True)
+    filter_quality = clean_cfg.get("filter_quality", True)
+    quality_config = quality_config_from_dict(clean_cfg.get("quality", {}))
+    untrusted_sources = set(clean_cfg.get("untrusted_sources", ["expitau"]))
+    untrusted_source_prefixes = set(clean_cfg.get("untrusted_source_prefixes", []))
+    require_trusted_vocab_for_untrusted = clean_cfg.get("require_trusted_vocab_for_untrusted", True)
+    reject_sample_limit = int(clean_cfg.get("reject_sample_limit", 500))
     split_ratios = clean_cfg.get("split_ratio", {"train": 0.80, "dev": 0.10, "test": 0.10})
 
     if not os.path.exists(input_file):
         print(f"Error: Input observations file not found at {input_file}")
         return
 
-    print("Pass 1: Aggregating observations at the pair level...")
+    trusted_concepts: Set[str] = set()
+    if filter_quality and require_trusted_vocab_for_untrusted:
+        print("Pass 1: Building trusted concept vocabulary...")
+        with open(input_file, "r", encoding="utf-8") as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                try:
+                    obs = json.loads(line)
+                except Exception:
+                    continue
+                source = obs.get("source", "")
+                if source_matches(source, untrusted_sources, untrusted_source_prefixes):
+                    continue
+                for field in ("input_a", "input_b", "output"):
+                    concept = normalize_concept(obs.get(field, ""))
+                    if concept:
+                        trusted_concepts.add(concept)
+
+    print("Pass 2: Aggregating observations at the pair level...")
     
     # Track emojis for mode resolution
     emoji_counts = defaultdict(lambda: defaultdict(int))
@@ -90,6 +122,8 @@ def main():
 
     line_count = 0
     garbage_discarded_count = 0
+    quality_reject_counts = Counter()
+    quality_reject_samples = []
     with open(input_file, "r", encoding="utf-8") as f:
         for line in f:
             if not line.strip():
@@ -125,6 +159,31 @@ def main():
                     garbage_discarded_count += 1
                     continue
 
+            if filter_quality:
+                reject_reason = recipe_quality_reason(key_a, key_b, key_out, quality_config)
+                if (
+                    reject_reason == "ok"
+                    and require_trusted_vocab_for_untrusted
+                    and source_matches(source, untrusted_sources, untrusted_source_prefixes)
+                    and (
+                        key_a not in trusted_concepts
+                        or key_b not in trusted_concepts
+                        or key_out not in trusted_concepts
+                    )
+                ):
+                    reject_reason = "untrusted_source_vocab"
+                if reject_reason != "ok":
+                    quality_reject_counts[reject_reason] += 1
+                    if len(quality_reject_samples) < reject_sample_limit:
+                        quality_reject_samples.append({
+                            "input_a": key_a,
+                            "input_b": key_b,
+                            "output": key_out,
+                            "source": source,
+                            "reason": reject_reason
+                        })
+                    continue
+
             pair_key = (key_a, key_b) if key_a <= key_b else (key_b, key_a)
 
             # Record emoji counts
@@ -157,6 +216,8 @@ def main():
         "num_keep": 0,
         "num_review_identity": 0,
         "num_garbage_discarded": garbage_discarded_count,
+        "num_quality_discarded": sum(quality_reject_counts.values()),
+        "quality_reject_counts": dict(sorted(quality_reject_counts.items())),
         "split_counts": {"train": 0, "dev": 0, "test": 0}
     }
 
@@ -223,6 +284,10 @@ def main():
     os.makedirs(os.path.dirname(report_file), exist_ok=True)
     with open(report_file, "w", encoding="utf-8") as frep:
         frep.write(json.dumps(metrics, indent=2) + "\n")
+
+    with open(reject_samples_file, "w", encoding="utf-8") as frej:
+        for sample in quality_reject_samples:
+            frej.write(json.dumps(sample, ensure_ascii=False) + "\n")
 
     print("\nData canonicalization and splits assigned successfully!")
     print(json.dumps(metrics, indent=2))

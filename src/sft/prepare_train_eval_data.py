@@ -15,26 +15,26 @@ class SampleCandidate:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Prepare deterministic conversational train/dev samples for SFT runs."
+        description="Prepare deterministic recipe train/dev samples for SFT runs."
     )
     parser.add_argument(
         "--train-input",
-        default="datasets/processed/sft_clean_train.jsonl",
-        help="Path to the full conversational train JSONL.",
+        default="datasets/processed/recipes_train.jsonl",
+        help="Path to the full recipe train JSONL.",
     )
     parser.add_argument(
         "--eval-input",
-        default="datasets/processed/sft_clean_dev.jsonl",
-        help="Path to the full conversational dev JSONL.",
+        default="datasets/processed/recipes_dev.jsonl",
+        help="Path to the full recipe dev JSONL.",
     )
     parser.add_argument(
         "--train-output",
-        default="artifacts/data/sft_clean_train_sample_8000.jsonl",
+        default="artifacts/data/recipes_train_sample_8000.jsonl",
         help="Path where the train sample will be written.",
     )
     parser.add_argument(
         "--eval-output",
-        default="artifacts/data/sft_clean_dev_sample_2000.jsonl",
+        default="artifacts/data/recipes_dev_sample_2000.jsonl",
         help="Path where the eval sample will be written.",
     )
     parser.add_argument(
@@ -68,6 +68,14 @@ def recipe_id_from_record(record: dict, fallback_index: int) -> str:
     recipe_id = metadata.get("recipe_id")
     if recipe_id:
         return recipe_id
+    if record.get("input_a") and record.get("input_b"):
+        outputs = record.get("outputs") or record.get("known_outputs") or record.get("output") or []
+        payload = json.dumps(
+            [record["input_a"], record["input_b"], outputs],
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
     return f"line-{fallback_index}"
 
 

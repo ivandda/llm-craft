@@ -11,25 +11,25 @@ partir de los datasets conversacionales completos.
 Entrada por defecto:
 
 ```text
-datasets/processed/sft_clean_train.jsonl
-datasets/processed/sft_clean_dev.jsonl
+datasets/processed/recipes_train.jsonl
+datasets/processed/recipes_dev.jsonl
 ```
 
 Salida por defecto:
 
 ```text
-artifacts/data/sft_clean_train_sample_8000.jsonl
-artifacts/data/sft_clean_dev_sample_2000.jsonl
+artifacts/data/recipes_train_sample_8000.jsonl
+artifacts/data/recipes_dev_sample_2000.jsonl
 ```
 
 Comando recomendado:
 
 ```bash
 uv run python -m src.sft.prepare_train_eval_data \
-  --train-input datasets/processed/sft_clean_train.jsonl \
-  --eval-input datasets/processed/sft_clean_dev.jsonl \
-  --train-output artifacts/data/sft_clean_train_sample_8000.jsonl \
-  --eval-output artifacts/data/sft_clean_dev_sample_2000.jsonl \
+  --train-input datasets/processed/recipes_train.jsonl \
+  --eval-input datasets/processed/recipes_dev.jsonl \
+  --train-output artifacts/data/recipes_train_sample_8000.jsonl \
+  --eval-output artifacts/data/recipes_dev_sample_2000.jsonl \
   --train-sample-size 8000 \
   --eval-sample-size 2000 \
   --seed 42
@@ -64,8 +64,8 @@ Comando recomendado:
 
 ```bash
 uv run python -m src.sft.create_colab_zip \
-  --train-file artifacts/data/sft_clean_train_sample_8000.jsonl \
-  --eval-file artifacts/data/sft_clean_dev_sample_2000.jsonl \
+  --train-file artifacts/data/recipes_train_sample_8000.jsonl \
+  --eval-file artifacts/data/recipes_dev_sample_2000.jsonl \
   --output-path artifacts/colab/llm-craft-sft-colab.zip
 ```
 
@@ -119,8 +119,8 @@ Entrenamiento LoRA:
 
 ```bash
 !uv run python -m src.sft.train \
-  --train-file artifacts/data/sft_clean_train_sample_8000.jsonl \
-  --eval-file artifacts/data/sft_clean_dev_sample_2000.jsonl \
+  --train-file artifacts/data/recipes_train_sample_8000.jsonl \
+  --eval-file artifacts/data/recipes_dev_sample_2000.jsonl \
   --output-dir artifacts/sft/smollm2-clean-lora \
   --model-name HuggingFaceTB/SmolLM2-135M-Instruct \
   --lora-mode lora \
@@ -131,8 +131,8 @@ Entrenamiento QLoRA en GPU CUDA:
 
 ```bash
 !uv run python -m src.sft.train \
-  --train-file artifacts/data/sft_clean_train_sample_8000.jsonl \
-  --eval-file artifacts/data/sft_clean_dev_sample_2000.jsonl \
+  --train-file artifacts/data/recipes_train_sample_8000.jsonl \
+  --eval-file artifacts/data/recipes_dev_sample_2000.jsonl \
   --output-dir artifacts/sft/smollm2-clean-qlora \
   --model-name HuggingFaceTB/SmolLM2-135M-Instruct \
   --lora-mode qlora \

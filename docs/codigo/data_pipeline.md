@@ -6,7 +6,7 @@ This document explains the deduplication, casing resolution, conflict flagging, 
 
 ## Pipeline Overview
 
-The data pipeline processes raw normalized observations to produce deduplicated, split-versioned canonical recipes, and outputs conversational formats suitable for Supervised Fine-Tuning (SFT) as well as structured pairs for baseline evaluation.
+The data pipeline processes raw normalized observations to produce deduplicated, split-versioned canonical recipes, minimal recipe splits for Supervised Fine-Tuning (SFT), and structured pairs for baseline evaluation. Prompt text is not stored in processed datasets; training and evaluation scripts render prompts at runtime.
 
 ```
 [recipe_observations_v0.jsonl] (Bronze)
@@ -17,7 +17,7 @@ The data pipeline processes raw normalized observations to produce deduplicated,
        ↙                    ↘
 src/data/export_sft.py    src/data/export_eval.py
      ↓                            ↓
-[sft_{var}_{split}.jsonl]   [eval_{split}_{size}.jsonl]
+[recipes_{split}.jsonl]     [eval_{split}_{size}.jsonl]
 ```
 
 ---
@@ -64,6 +64,26 @@ To prevent vocabulary pollution and keep student training clean, the pipeline ch
   5. **Single-Character Punctuation**: Non-alphanumeric single-character strings (e.g. `;`, `.`).
 * **Metrics**: The pipeline logs the count of dropped recipes under `"num_garbage_discarded"`.
 
+### 7. Commonsense Quality Filtering
+The pipeline now applies a stricter recipe-quality gate before canonical aggregation. The goal is to train and evaluate on clean commonsense combinations, not meme-like or malformed Infinite Craft artifacts.
+
+The filter rejects a recipe if any input or output is:
+* too long for a simple concept (`max_words` and `max_chars` in config),
+* too short to be useful as a standalone concept,
+* sentence-like or title-like,
+* a formula/code fragment,
+* numeric or digit-heavy,
+* an identity copy,
+* a placeholder/parse-artifact token such as `undefined`,
+* a repeated-token phrase,
+* a suspicious generated suffix such as `-nado`, or
+* a vowelless long token that looks like an arbitrary acronym.
+
+The filter also treats Expitau as an untrusted source by default. Expitau recipes are admitted only when their input and output concepts are already present in trusted sources, then pass the same general string-quality checks. This is intentionally high-precision: without a model judge or external knowledge base, regex alone cannot reliably distinguish a real named entity from a plausible-looking but bad compound.
+
+For human review, cleaning writes:
+* `datasets/reports/quality_reject_samples.jsonl`: capped rejected examples with one short reason.
+
 ---
 
 ## Split Assignment & Input Leakage Prevention
@@ -80,65 +100,48 @@ To ensure a robust evaluation of **compositional creativity**, we perform a dete
 
 ## Dataset Variants & Outputs
 
-We export SFT variants and dedicated evaluation files into `datasets/processed/`.
+We export recipe split files and dedicated evaluation files into `datasets/processed/`.
 
-### 1. Conversational SFT Exporter (`export_sft.py`)
-Generates training files in conversational `messages` format:
-* **`sft_clean`**: Strict, high-confidence recipes. Excludes conflicts and identity copies (`status == "keep" and is_conflicting_pair == false`).
-  * `train`: `4,823,461` recipes
-  * `dev`: `603,384` recipes
-  * `test`: `603,103` recipes
-* **`sft_all`**: All valid recipes (`status in ["keep", "keep_conflicting", "review_identity"]`).
-  * `train`: `4,827,910` recipes
-  * `dev`: `603,929` recipes
-  * `test`: `603,628` recipes
+### 1. Minimal Recipe Exporter (`export_sft.py`)
+Generates prompt-free recipe files:
+* **`recipes_train.jsonl`**: clean training pairs.
+* **`recipes_dev.jsonl`**: clean development pairs.
+* **`recipes_test.jsonl`**: clean held-out test pairs.
 
-*Prompt Format:*
+Each row represents `A + B = {C, D, ...}`:
+
 ```json
 {
-  "messages": [
-    {
-      "role": "user",
-      "content": "Given two concepts, combine them into one resulting concept.\n\nConcept A: Fire\nConcept B: Water\n\nReturn only the resulting concept."
-    },
-    {
-      "role": "assistant",
-      "content": "Steam"
-    }
-  ],
-  "metadata": {
-    "pair_id": "...",
-    "recipe_id": "...",
-    "pair_key": "fire+water",
-    "recipe_key": "fire+water=>steam",
-    "source_count": 2,
-    "observation_count": 4,
-    "pair_num_outputs": 1,
-    "is_conflicting_pair": false,
-    "status": "keep",
-    "split": "train"
-  }
+  "input_a": "fire",
+  "input_b": "water",
+  "outputs": ["steam", "mist"]
 }
 ```
 
+`src/sft/train.py` expands `outputs` at runtime into supervised targets and renders the prompt from `--prompt-template`.
+
 ### 2. Structured Evaluation Exporter (`export_eval.py`)
-Generates structured pair-level evaluation sets. It uses a **reservoir sampling** algorithm to scan the 3.5 GB dataset in two streaming passes using **less than 10 MB of RAM**:
+Generates structured pair-level evaluation sets. It uses a **reservoir sampling** algorithm to scan the canonical dataset with low memory usage:
 * **`eval_dev_1k.jsonl`**: 1,000 clean dev pairs.
 * **`eval_test_1k.jsonl`**: 1,000 clean test pairs.
-* **`eval_test_identity_500.jsonl`**: 500 test identity pairs (output equals input).
-* **`eval_test_conflicting_500.jsonl`**: 480 test conflicting pairs (pairs with multiple known correct outputs; 480 represents the total number of conflicts in the test split).
+
+Set any evaluation size to `"all"` to export the complete matching split instead of a sample:
+
+```yaml
+evaluation_export:
+  sizes:
+    dev_keep: all
+    test_keep: all
+```
+
+The resulting files use `all` in the name, for example `eval_dev_all.jsonl` and `eval_test_all.jsonl`. Other strings are rejected as config errors so typos such as `alll` do not silently create partial or empty eval sets.
 
 *Evaluation Record Schema:*
 ```json
 {
-  "pair_id": "8a38a7c2921a8d0526be...",
-  "pair_key": "fire+water",
-  "input_a": "Fire",
-  "input_b": "Water",
-  "known_outputs": ["Mist", "Steam"],
-  "canonical_output": "Steam",
-  "status": "keep",
-  "split": "test"
+  "input_a": "fire",
+  "input_b": "water",
+  "known_outputs": ["mist", "steam"]
 }
 ```
 *During scoring, a student prediction is evaluated against the entire list of `known_outputs` to reward legitimate alternative outputs.*
@@ -162,7 +165,7 @@ uv run python -m src.data.normalize
 # Step 2: Clean, canonicalize and assign splits
 uv run python -m src.data.clean
 
-# Step 3: Export SFT datasets
+# Step 3: Export minimal recipe split datasets
 uv run python -m src.data.export_sft
 
 # Step 4: Export structured evaluation datasets
