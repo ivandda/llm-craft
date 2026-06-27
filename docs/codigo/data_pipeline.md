@@ -125,8 +125,8 @@ Each row represents `A + B = {C, D, ...}`:
 
 ### 2. Structured Evaluation Exporter (`export_eval.py`)
 Generates structured pair-level evaluation sets. It uses a **reservoir sampling** algorithm to scan the canonical dataset with low memory usage:
-* **`eval_dev_1k.jsonl`**: 1,000 clean dev pairs.
-* **`eval_test_1k.jsonl`**: 1,000 clean test pairs.
+* **`eval_dev_all.jsonl`**: all clean dev pairs with the current config.
+* **`eval_test_all.jsonl`**: all clean test pairs with the current config.
 
 Set any evaluation size to `"all"` to export the complete matching split instead of a sample:
 
@@ -138,6 +138,7 @@ evaluation_export:
 ```
 
 The resulting files use `all` in the name, for example `eval_dev_all.jsonl` and `eval_test_all.jsonl`. Other strings are rejected as config errors so typos such as `alll` do not silently create partial or empty eval sets.
+Numeric sizes are also supported and use compact names such as `eval_dev_1k.jsonl`.
 
 *Evaluation Record Schema:*
 ```json
@@ -185,6 +186,48 @@ Example enriched record:
 }
 ```
 
+### 4. Teacher Rationale Enrichment (`enrich_rationales.py`)
+Adds one concise rationale to each existing `candidate_output` in
+`dataset_01_teacher_enriched_multi_output_no_rationale/`. This stage does not generate new
+outputs: it validates that the teacher returns the same output strings in the same order and
+records failures when the response is invalid or incomplete.
+
+Output folder:
+* **`dataset_02_teacher_enriched_multi_output_with_rationale/`**: same candidates as dataset 01,
+  with a `rationale` field added to each candidate when generation succeeds.
+
+Example rationale-enriched record:
+
+```json
+{
+  "input_a": "fire",
+  "input_b": "water",
+  "candidate_outputs": [
+    {
+      "output": "steam",
+      "source": "observed",
+      "rationale": "Fire heats water until it turns into steam."
+    },
+    {
+      "output": "sauna",
+      "source": "teacher",
+      "rationale": "Heat and water combine into the hot, steamy setting of a sauna."
+    }
+  ],
+  "quality_status": "complete",
+  "metadata": {
+    "source_dataset": "dataset_01_teacher_enriched_multi_output_no_rationale",
+    "source_split": "train",
+    "teacher_provider": "google_vertex_ai",
+    "teacher_model": "gemini-2.5-flash",
+    "enrichment_version": "teacher_multi_output_with_rationale_v1",
+    "target_num_outputs": 5,
+    "has_rationales": true,
+    "rationale_language": "en"
+  }
+}
+```
+
 ---
 
 ## Running the Pipeline
@@ -215,4 +258,7 @@ uv run python -m src.data.enrich_multi_output --splits dev --limit 3 --dry-run
 
 # Optional minimal real teacher smoke test
 uv run python -m src.data.enrich_multi_output --splits dev --limit 3
+
+# Optional minimal real rationale smoke test
+uv run python -m src.data.enrich_rationales --splits dev --limit 3 --no-resume
 ```

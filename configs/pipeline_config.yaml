@@ -61,6 +61,8 @@ evaluation_export:
     dev_keep: all
     test_keep: all
 
+# Pasos manuales con llamada a LLM:
+
 # Paso 5: Enriquecimiento teacher multi-salida (no incluido en run_pipeline.py)
 enrichment:
   provider: "google_vertex_ai"
@@ -72,3 +74,16 @@ enrichment:
   prompt_version: "teacher_multi_output_no_rationale_v1"
   max_retries: 2
   temperature: 0.7
+
+# Paso 6: Rationales teacher para dataset multi-salida (no incluido en run_pipeline.py)
+rationale_enrichment:
+  provider: "google_vertex_ai"
+  model: "gemini-2.5-flash"
+  location: "us-central1"
+  input_dataset_name: "dataset_01_teacher_enriched_multi_output_no_rationale"
+  output_dataset_name: "dataset_02_teacher_enriched_multi_output_with_rationale"
+  prompt_version: "teacher_multi_output_with_rationale_v1"
+  rationale_language: "en"
+  max_retries: 2
+  temperature: 0.4
+  max_rationale_words: 24

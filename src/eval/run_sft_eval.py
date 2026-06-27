@@ -22,7 +22,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--eval-file",
-        default="datasets/processed/eval_dev_1k.jsonl",
+        default="datasets/processed/eval_dev_all.jsonl",
         help="JSONL file with input_a, input_b, canonical_output, and known_outputs.",
     )
     parser.add_argument(

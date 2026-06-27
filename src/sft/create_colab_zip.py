@@ -7,7 +7,7 @@ from pathlib import Path
 DEFAULT_OUTPUT_PATH = "artifacts/colab/llm-craft-sft-colab.zip"
 DEFAULT_TRAIN_FILE = "artifacts/data/recipes_train_sample_8000.jsonl"
 DEFAULT_EVAL_FILE = "artifacts/data/recipes_dev_sample_2000.jsonl"
-DEFAULT_STRUCTURED_EVAL_FILE = "datasets/processed/eval_dev_1k.jsonl"
+DEFAULT_STRUCTURED_EVAL_FILE = "datasets/processed/eval_dev_all.jsonl"
 
 EXCLUDED_DIRS = {"__pycache__", ".pytest_cache", ".ruff_cache"}
 EXCLUDED_SUFFIXES = {".pyc", ".pyo"}
@@ -81,7 +81,7 @@ def require_existing(paths: list[Path]) -> None:
         raise FileNotFoundError(
             "Cannot build Colab zip because these paths are missing:\n"
             f"{formatted}\n"
-            "If datasets/processed/eval_dev_1k.jsonl is missing, run:\n"
+            "If datasets/processed/eval_dev_all.jsonl is missing, run:\n"
             "uv run python -m src.data.run_pipeline\n"
             "uv run python -m src.data.export_eval"
         )

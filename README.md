@@ -56,7 +56,7 @@ Genera los datasets estructurados con respuestas alternativas válidas conocidas
 ```bash
 uv run python -m src.data.export_eval
 ```
-* **Qué hace**: Utiliza *Reservoir Sampling* de un solo paso de lectura para extraer muestras aleatorias deterministas (`eval_dev_1k`, `eval_test_1k`, etc.) con bajo uso de memoria. Cada registro es mínimo y lista las respuestas válidas conocidas (`known_outputs`) asociadas al par.
+* **Qué hace**: Utiliza *Reservoir Sampling* de un solo paso de lectura para extraer muestras aleatorias deterministas o exportar el split completo, según `evaluation_export.sizes`. Cada registro es mínimo y lista las respuestas válidas conocidas (`known_outputs`) asociadas al par.
 * **Tamaño completo**: En `evaluation_export.sizes`, usar `all` en lugar de un número para exportar todo el split (`eval_dev_all.jsonl`, `eval_test_all.jsonl`).
 
 ### 5. Enriquecimiento con Teacher (manual)
@@ -75,6 +75,19 @@ uv run python -m src.data.enrich_multi_output --splits dev --limit 3
 La generación completa queda como paso manual para controlar costo:
 ```bash
 uv run python -m src.data.enrich_multi_output
+```
+
+### 6. Rationales con Teacher (manual)
+Agrega una explicación breve a cada `candidate_output` del dataset multi-salida ya generado. No crea nuevas salidas: valida que el teacher mantenga exactamente los outputs existentes y escribe el resultado en `datasets/enriched/dataset_02_teacher_enriched_multi_output_with_rationale/`.
+
+Smoke test real mínimo:
+```bash
+uv run python -m src.data.enrich_rationales --splits dev --limit 3 --no-resume
+```
+
+La generación completa queda como paso manual para controlar costo:
+```bash
+uv run python -m src.data.enrich_rationales
 ```
 
 ---
@@ -96,7 +109,7 @@ uv run python -m src.sft.prepare_train_eval_data \
 
 ### Crear zip para Colab
 
-El zip incluye `datasets/processed/eval_dev_1k.jsonl` para evaluacion batch.
+El zip incluye `datasets/processed/eval_dev_all.jsonl` para evaluacion batch.
 Si todavia no existe, generarlo con:
 
 ```bash
@@ -143,14 +156,14 @@ uv run python -m src.sft.predict \
 
 ### Evaluación batch
 
-Durante el desarrollo, usar `eval_dev_1k.jsonl` para comparar variantes sin tocar el test final.
+Durante el desarrollo, usar `eval_dev_all.jsonl` para comparar variantes sin tocar el test final.
 Si falta ese archivo, correr primero `uv run python -m src.data.export_eval`.
 
 Evaluar el modelo base contra respuestas conocidas de dev:
 
 ```bash
 uv run python -m src.eval.run_sft_eval \
-  --eval-file datasets/processed/eval_dev_1k.jsonl \
+  --eval-file datasets/processed/eval_dev_all.jsonl \
   --output-file artifacts/eval/smollm2-base-dev.jsonl \
   --model-name HuggingFaceTB/SmolLM2-135M-Instruct
 ```
@@ -159,7 +172,7 @@ Evaluar un adapter LoRA entrenado en dev:
 
 ```bash
 uv run python -m src.eval.run_sft_eval \
-  --eval-file datasets/processed/eval_dev_1k.jsonl \
+  --eval-file datasets/processed/eval_dev_all.jsonl \
   --output-file artifacts/eval/smollm2-clean-lora-dev.jsonl \
   --adapter-dir artifacts/sft/smollm2-clean-lora
 ```
@@ -167,7 +180,7 @@ uv run python -m src.eval.run_sft_eval \
 El comando genera un JSONL con predicciones por ejemplo e imprime métricas agregadas:
 `canonical_accuracy`, `known_output_accuracy` y `empty_predictions`.
 
-Reservar `eval_test_1k.jsonl` para la evaluación final.
+Reservar `eval_test_all.jsonl` para la evaluación final.
 
 La guía completa está en [sft_training_colab.md](docs/codigo/sft_training_colab.md).
 
