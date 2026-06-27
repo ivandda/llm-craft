@@ -1,0 +1,45 @@
+{
+  "created_at": "2026-06-27T21:02:27.977114+00:00",
+  "mode": "batch-import",
+  "config": {
+    "provider": "google_vertex_ai",
+    "model": "gemini-2.5-flash",
+    "location": "us-central1",
+    "input_dataset_name": "recipes",
+    "output_dataset_name": "dataset_04_teacher_ranked_flash_strict_v2",
+    "target_num_outputs": 5,
+    "prompt_version": "teacher_structured_enrichment_v2",
+    "prompt_style": "strict",
+    "max_retries": 2,
+    "temperature": 0.4,
+    "thinking_level": null,
+    "thinking_budget": null,
+    "max_rationale_words": 24,
+    "input_price_per_million_tokens": 0.3,
+    "output_price_per_million_tokens": 2.5
+  },
+  "counts": {
+    "read": 14370,
+    "written": 12719,
+    "skipped_existing": 0,
+    "complete": 1117,
+    "partial_enrichment": 11602,
+    "rejected": 1651,
+    "batch_errors": 0,
+    "parse_errors": 0,
+    "input_tokens": 9156141,
+    "output_tokens": 2668955,
+    "total_tokens": 26339507
+  },
+  "batch_output_files": [
+    "datasets/enriched/dataset_04_teacher_ranked_flash_strict_v2/batch_output/predictions.jsonl"
+  ],
+  "batch_index_path": "/Users/ivan/repos/llm-craft/datasets/enriched/dataset_04_teacher_ranked_flash_strict_v2/batch_index.jsonl",
+  "token_usage": {
+    "input_tokens": 9156141,
+    "output_tokens": 2668955,
+    "total_tokens": 26339507
+  },
+  "estimated_realtime_cost_usd": 9.41923,
+  "estimated_batch_cost_usd": 4.709615
+}
