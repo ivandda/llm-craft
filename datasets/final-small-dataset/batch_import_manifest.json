@@ -1,0 +1,45 @@
+{
+  "created_at": "2026-06-27T20:23:23.910884+00:00",
+  "mode": "batch-import",
+  "config": {
+    "provider": "google_vertex_ai",
+    "model": "gemini-2.5-flash",
+    "location": "us-central1",
+    "input_dataset_name": "recipes",
+    "output_dataset_name": "dataset_04_batch_export_smoke",
+    "target_num_outputs": 5,
+    "prompt_version": "teacher_structured_enrichment_v2",
+    "prompt_style": "strict",
+    "max_retries": 2,
+    "temperature": 0.4,
+    "thinking_level": null,
+    "thinking_budget": null,
+    "max_rationale_words": 24,
+    "input_price_per_million_tokens": 0.3,
+    "output_price_per_million_tokens": 2.5
+  },
+  "counts": {
+    "read": 30,
+    "written": 30,
+    "skipped_existing": 0,
+    "complete": 3,
+    "partial_enrichment": 27,
+    "rejected": 0,
+    "batch_errors": 0,
+    "parse_errors": 0,
+    "input_tokens": 19128,
+    "output_tokens": 5087,
+    "total_tokens": 51769
+  },
+  "batch_output_files": [
+    "datasets/final-small-dataset/dataset_04_batch_export_smoke/batch_output/predictions.jsonl"
+  ],
+  "batch_index_path": "datasets/final-small-dataset/dataset_04_batch_export_smoke/batch_index.jsonl",
+  "token_usage": {
+    "input_tokens": 19128,
+    "output_tokens": 5087,
+    "total_tokens": 51769
+  },
+  "estimated_realtime_cost_usd": 0.018456,
+  "estimated_batch_cost_usd": 0.009228
+}
