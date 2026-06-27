@@ -62,7 +62,7 @@ uv run python -m src.data.export_eval
 ### 5. Enriquecimiento con Teacher (manual)
 Genera un dataset derivado agrupado con hasta cinco salidas por receta, sin rationales. Conserva las salidas observadas de `recipes_train/dev/test.jsonl` y usa Gemini 2.5 Flash solo para completar alternativas faltantes.
 
-Camino recomendado actual: enriquecimiento estructurado en una sola llamada con Gemini 2.5 Flash-Lite. El teacher conserva salidas observadas buenas, agrega alternativas solo si son plausibles, ordena candidatos de mejor a peor receta y escribe rationales breves para todas las salidas aceptadas. Los registros parciales son válidos: no se fuerzan respuestas.
+Camino recomendado actual: enriquecimiento estructurado en una sola llamada con Gemini 2.5 Flash. El teacher conserva salidas observadas buenas, agrega alternativas solo si son plausibles, ordena candidatos de mejor a peor receta y escribe rationales breves para todas las salidas aceptadas. Los registros parciales son válidos: no se fuerzan respuestas.
 
 Smoke test real mínimo durante desarrollo:
 ```bash
@@ -74,7 +74,28 @@ Prueba de costo/calidad:
 uv run python -m src.data.enrich_teacher --splits train --limit 100 --no-resume
 ```
 
-El script escribe `datasets/enriched/dataset_03_teacher_structured_enriched/manifest.json` con uso de tokens y costo estimado. Las recetas rechazadas van a `rejected.jsonl`.
+El script realtime escribe `datasets/enriched/dataset_04_teacher_ranked_flash_strict_v2/manifest.json` con uso de tokens y costo estimado. Las recetas rechazadas van a `rejected.jsonl`.
+
+Para el dataset completo, usar batch de Vertex AI:
+```bash
+# 1. Exportar requests locales y el índice de postproceso
+uv run python -m src.data.enrich_teacher --mode batch-export --no-resume
+
+# 2. Subir datasets/enriched/dataset_04_teacher_ranked_flash_strict_v2/batch_requests.jsonl a GCS
+#    y lanzar el batch. Reemplazar bucket/prefix.
+uv run python -m src.data.enrich_teacher \
+  --mode batch-submit \
+  --batch-input-uri gs://BUCKET/PREFIX/batch_requests.jsonl \
+  --batch-output-uri gs://BUCKET/PREFIX/batch_output \
+  --batch-display-name llm-craft-teacher-ranked-v2
+
+# 3. Descargar el JSONL generado por Vertex y convertirlo al dataset enriquecido
+uv run python -m src.data.enrich_teacher \
+  --mode batch-import \
+  --batch-output-files /path/to/downloaded/batch_output.jsonl
+```
+
+El LLM solo devuelve `keep_recipe`, `reject_reason` y `candidate_outputs`. El código agrega `rank`, `quality_status`, metadata, uso de tokens y costo estimado. Batch tiene descuento aproximado de 50%; el manifest de import escribe costo realtime y costo batch estimado.
 
 Smoke test real mínimo:
 ```bash
@@ -226,3 +247,36 @@ Para más detalles teóricos y de diseño, consulte:
 * [sft_training_colab.md](docs/codigo/sft_training_colab.md): Comandos para preparar muestras SFT, empaquetar Colab, entrenar y predecir.
 * [frontend_next_app.md](docs/codigo/frontend_next_app.md): Guía para ejecutar, validar y extender la app Next.js jugable.
 * [destilacion_creatividad_composicional.md](docs/informe/destilacion_creatividad_composicional.md): Paper de diseño del proyecto de investigación.
+
+
+---
+
+# Batch info:
+
+```bash
+(llm-craft) ➜  llm-craft git:(feature/enrich-dataset) ✗ uv run python -m src.data.enrich_teacher \
+  --mode batch-submit \
+  --batch-input-uri gs://llm-craft-nlp2026-498021/batch_input/batch_requests.jsonl \
+  --batch-output-uri gs://llm-craft-nlp2026-498021/batch_output/ \
+  --batch-display-name llm-craft-teacher-ranked-v2
+{
+  "name": "projects/486944883203/locations/us-central1/batchPredictionJobs/612764435819266048",
+  "display_name": "llm-craft-teacher-ranked-v2",
+  "state": "JOB_STATE_PENDING",
+  "create_time": "2026-06-27T20:06:18.146878Z",
+  "update_time": "2026-06-27T20:06:18.146878Z",
+  "model": "publishers/google/models/gemini-2.5-flash",
+  "src": {
+    "format": "jsonl",
+    "gcs_uri": [
+      "gs://llm-craft-nlp2026-498021/batch_input/batch_requests.jsonl"
+    ]
+  },
+  "dest": {
+    "format": "jsonl",
+    "gcs_uri": "gs://llm-craft-nlp2026-498021/batch_output/"
+  },
+  "is_terminal_state": false
+}
+(llm-craft) ➜  llm-craft git:(feature/enrich-dataset) ✗ 
+```

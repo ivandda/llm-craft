@@ -2,6 +2,7 @@ import argparse
 import json
 import os
 import random
+import re
 import sys
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
@@ -19,9 +20,18 @@ DEFAULT_PROMPT_VERSION = "teacher_structured_enrichment_v2"
 DEFAULT_OUTPUT_DATASET_NAME = "dataset_03_teacher_structured_enriched"
 SPLITS = ("train", "dev", "test")
 PROMPT_STYLES = ("balanced", "strict")
+BATCH_MODES = ("realtime", "batch-export", "batch-submit", "batch-import")
 MODEL_PRICE_BY_MILLION_TOKENS = {
     "gemini-2.5-flash-lite": (0.10, 0.40),
     "gemini-2.5-flash": (0.30, 2.50),
+}
+BATCH_DISCOUNT = 0.50
+COMPLETED_BATCH_STATES = {
+    "JOB_STATE_SUCCEEDED",
+    "JOB_STATE_FAILED",
+    "JOB_STATE_CANCELLED",
+    "JOB_STATE_PAUSED",
+    "JOB_STATE_EXPIRED",
 }
 
 
@@ -168,6 +178,12 @@ def parse_args() -> argparse.Namespace:
         description="One-call teacher enrichment with structured outputs, alternatives, and rationales."
     )
     parser.add_argument(
+        "--mode",
+        choices=BATCH_MODES,
+        default="realtime",
+        help="Run realtime enrichment, export batch requests, submit a batch job, or import batch output.",
+    )
+    parser.add_argument(
         "--splits",
         nargs="+",
         choices=SPLITS,
@@ -226,6 +242,37 @@ def parse_args() -> argparse.Namespace:
         default=True,
         help="Skip rows that already have at least one candidate output.",
     )
+    parser.add_argument(
+        "--batch-input-uri",
+        default=None,
+        help="GCS JSONL URI to submit, for example gs://bucket/path/requests.jsonl.",
+    )
+    parser.add_argument(
+        "--batch-output-uri",
+        default=None,
+        help="GCS output prefix for batch results, for example gs://bucket/path/output.",
+    )
+    parser.add_argument(
+        "--batch-display-name",
+        default=None,
+        help="Optional Vertex batch job display name.",
+    )
+    parser.add_argument(
+        "--batch-job-name",
+        default=None,
+        help="Existing Vertex batch job name to inspect.",
+    )
+    parser.add_argument(
+        "--batch-output-files",
+        nargs="+",
+        default=None,
+        help="Local JSONL output files downloaded from the completed batch job.",
+    )
+    parser.add_argument(
+        "--batch-index-path",
+        default=None,
+        help="Local batch index JSONL path. Defaults to the selected enriched output directory.",
+    )
     return parser.parse_args()
 
 
@@ -281,6 +328,98 @@ def build_teacher_prompt(
     )
 
 
+def build_batch_prompt(record_id: str, prompt: str) -> str:
+    return (
+        "Dataset record id: "
+        + record_id
+        + "\nThis id is metadata for postprocessing. Do not include it in your response.\n\n"
+        + prompt
+    )
+
+
+def build_response_schema() -> dict:
+    return {
+        "type": "object",
+        "properties": {
+            "keep_recipe": {
+                "type": "boolean",
+                "description": "False only when the observed recipe is clearly malformed or unrelated.",
+            },
+            "reject_reason": {
+                "type": "string",
+                "nullable": True,
+                "description": "Short reason used only when keep_recipe is false.",
+            },
+            "candidate_outputs": {
+                "type": "array",
+                "description": "Accepted outputs ordered from strongest to weakest recipe.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "output": {
+                            "type": "string",
+                            "description": "A short concept produced by combining the inputs.",
+                        },
+                        "rationale": {
+                            "type": "string",
+                            "description": "One short visible explanation for why this output follows from the inputs.",
+                        },
+                        "source": {
+                            "type": "string",
+                            "enum": ["observed", "teacher"],
+                            "description": (
+                                "Use observed only for outputs copied exactly from the observed output list; "
+                                "use teacher for new alternatives."
+                            ),
+                        },
+                    },
+                    "required": ["output", "rationale", "source"],
+                },
+            },
+        },
+        "required": ["keep_recipe", "candidate_outputs"],
+    }
+
+
+def build_batch_request(
+    record_id: str,
+    input_a: str,
+    input_b: str,
+    observed_outputs: list[str],
+    config: StructuredEnrichmentConfig,
+) -> dict:
+    max_alternatives = max(config.target_num_outputs - len(observed_outputs), 0)
+    prompt = build_batch_prompt(
+        record_id=record_id,
+        prompt=build_teacher_prompt(
+            input_a=input_a,
+            input_b=input_b,
+            observed_outputs=observed_outputs,
+            max_alternatives=max_alternatives,
+            max_rationale_words=config.max_rationale_words,
+            prompt_style=config.prompt_style,
+        ),
+    )
+    generation_config: dict = {
+        "temperature": config.temperature,
+        "responseMimeType": "application/json",
+        "responseSchema": build_response_schema(),
+    }
+    if config.thinking_budget is not None:
+        generation_config["thinkingConfig"] = {"thinkingBudget": config.thinking_budget}
+    return {
+        "request": {
+            "contents": [
+                {
+                    "role": "user",
+                    "parts": [{"text": prompt}],
+                }
+            ],
+            "generationConfig": generation_config,
+        }
+    }
+
+
 def enrich_recipe(
     recipe: dict,
     split: str,
@@ -328,6 +467,65 @@ def enrich_recipe(
             reason="teacher_response_error",
             detail=last_error,
             outputs=observed_outputs,
+        ), usage
+
+    if not teacher_enrichment.keep_recipe:
+        return None, build_rejection(
+            input_a=input_a,
+            input_b=input_b,
+            split=split,
+            reason=normalize_reject_reason(teacher_enrichment.reject_reason),
+            detail=None,
+            outputs=observed_outputs,
+        ), usage
+
+    record = build_enriched_record(
+        input_a=input_a,
+        input_b=input_b,
+        observed_outputs=observed_outputs,
+        teacher_enrichment=teacher_enrichment,
+        split=split,
+        config=config,
+        usage=usage,
+    )
+    if not record["candidate_outputs"]:
+        return None, build_rejection(
+            input_a=input_a,
+            input_b=input_b,
+            split=split,
+            reason="no_valid_teacher_candidates",
+            detail=None,
+            outputs=observed_outputs,
+        ), usage
+
+    return record, None, usage
+
+
+def enrich_recipe_from_teacher_enrichment(
+    recipe: dict,
+    split: str,
+    teacher_enrichment: TeacherEnrichment,
+    config: StructuredEnrichmentConfig,
+    usage: TokenUsage,
+) -> tuple[dict | None, dict | None, TokenUsage]:
+    input_a = normalize_concept(recipe.get("input_a", ""))
+    input_b = normalize_concept(recipe.get("input_b", ""))
+    observed_outputs = normalize_valid_outputs(
+        recipe.get("outputs", []),
+        input_a=input_a,
+        input_b=input_b,
+        existing_outputs=[],
+        limit=config.target_num_outputs,
+    )
+
+    if not input_a or not input_b or not observed_outputs:
+        return None, build_rejection(
+            input_a=input_a,
+            input_b=input_b,
+            split=split,
+            reason="no_valid_observed_outputs",
+            detail=None,
+            outputs=recipe.get("outputs", []),
         ), usage
 
     if not teacher_enrichment.keep_recipe:
@@ -598,6 +796,345 @@ def enrich_split(
     return counts
 
 
+def export_batch_requests(
+    processed_dir: Path,
+    output_dir: Path,
+    splits: list[str],
+    config: StructuredEnrichmentConfig,
+    limit: int | None,
+    sample_size: int | None,
+    seed: int,
+    resume: bool,
+) -> dict:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    request_path = output_dir / "batch_requests.jsonl"
+    index_path = output_dir / "batch_index.jsonl"
+    rejected_path = output_dir / "rejected.jsonl"
+    completed_keys_by_split = {
+        split: read_completed_keys(output_dir / f"{split}.jsonl") if resume else set() for split in splits
+    }
+    counts = {
+        "read": 0,
+        "requests_written": 0,
+        "skipped_existing": 0,
+        "pre_rejected": 0,
+    }
+
+    with (
+        request_path.open("w", encoding="utf-8") as request_file,
+        index_path.open("w", encoding="utf-8") as index_file,
+        rejected_path.open("a", encoding="utf-8") as rejected_file,
+    ):
+        for split in splits:
+            input_path = processed_dir / f"recipes_{split}.jsonl"
+            if not input_path.exists():
+                raise FileNotFoundError(f"Recipe split not found: {input_path}")
+            split_read = 0
+            for recipe_index, recipe in enumerate(load_recipes(input_path, sample_size=sample_size, seed=seed)):
+                if limit is not None and split_read >= limit:
+                    break
+                key = recipe_key(recipe)
+                if key in completed_keys_by_split[split]:
+                    counts["skipped_existing"] += 1
+                    continue
+                counts["read"] += 1
+                split_read += 1
+                input_a = normalize_concept(recipe.get("input_a", ""))
+                input_b = normalize_concept(recipe.get("input_b", ""))
+                observed_outputs = normalize_valid_outputs(
+                    recipe.get("outputs", []),
+                    input_a=input_a,
+                    input_b=input_b,
+                    existing_outputs=[],
+                    limit=config.target_num_outputs,
+                )
+                record_id = f"{split}:{counts['read']:08d}"
+                if not input_a or not input_b or not observed_outputs:
+                    rejected_file.write(
+                        json.dumps(
+                            build_rejection(
+                                input_a=input_a,
+                                input_b=input_b,
+                                split=split,
+                                reason="no_valid_observed_outputs",
+                                detail=None,
+                                outputs=recipe.get("outputs", []),
+                            ),
+                            ensure_ascii=False,
+                        )
+                        + "\n"
+                    )
+                    counts["pre_rejected"] += 1
+                    continue
+                request_file.write(
+                    json.dumps(
+                        build_batch_request(
+                            record_id=record_id,
+                            input_a=input_a,
+                            input_b=input_b,
+                            observed_outputs=observed_outputs,
+                            config=config,
+                        ),
+                        ensure_ascii=False,
+                    )
+                    + "\n"
+                )
+                index_file.write(
+                    json.dumps(
+                        {
+                            "record_id": record_id,
+                            "split": split,
+                            "recipe_index": recipe_index,
+                            "recipe": {
+                                "input_a": input_a,
+                                "input_b": input_b,
+                                "outputs": observed_outputs,
+                            },
+                        },
+                        ensure_ascii=False,
+                    )
+                    + "\n"
+                )
+                counts["requests_written"] += 1
+
+    return {
+        "request_path": str(request_path),
+        "index_path": str(index_path),
+        "counts": counts,
+    }
+
+
+def submit_batch_job(
+    config: StructuredEnrichmentConfig,
+    repo_root: Path,
+    input_uri: str,
+    output_uri: str | None,
+    display_name: str | None,
+) -> dict:
+    from google import genai
+    from google.genai import types
+
+    env_path = repo_root / ".env"
+    if env_path.exists():
+        load_dotenv(env_path)
+
+    creds_rel_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+    if creds_rel_path:
+        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str((repo_root / creds_rel_path).resolve())
+
+    project_id = os.environ.get("GOOGLE_CLOUD_PROJECT")
+    if not project_id:
+        raise RuntimeError("GOOGLE_CLOUD_PROJECT is not set in environment or .env file.")
+
+    client = genai.Client(vertexai=True, project=project_id, location=config.location)
+    create_config = types.CreateBatchJobConfig(display_name=display_name, dest=output_uri)
+    job = client.batches.create(model=config.model, src=input_uri, config=create_config)
+    return batch_job_to_dict(job)
+
+
+def get_batch_job(config: StructuredEnrichmentConfig, repo_root: Path, job_name: str) -> dict:
+    from google import genai
+
+    env_path = repo_root / ".env"
+    if env_path.exists():
+        load_dotenv(env_path)
+
+    creds_rel_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+    if creds_rel_path:
+        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str((repo_root / creds_rel_path).resolve())
+
+    project_id = os.environ.get("GOOGLE_CLOUD_PROJECT")
+    if not project_id:
+        raise RuntimeError("GOOGLE_CLOUD_PROJECT is not set in environment or .env file.")
+
+    client = genai.Client(vertexai=True, project=project_id, location=config.location)
+    return batch_job_to_dict(client.batches.get(name=job_name))
+
+
+def batch_job_to_dict(job) -> dict:
+    payload = job.model_dump(mode="json", exclude_none=True) if hasattr(job, "model_dump") else dict(job)
+    state = str(payload.get("state", ""))
+    payload["is_terminal_state"] = state in COMPLETED_BATCH_STATES
+    return payload
+
+
+def import_batch_outputs(
+    output_files: list[Path],
+    index_path: Path,
+    output_dir: Path,
+    config: StructuredEnrichmentConfig,
+    resume: bool,
+) -> dict:
+    index = read_batch_index(index_path)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    rejected_path = output_dir / "rejected.jsonl"
+    completed_keys_by_split = {
+        split: read_completed_keys(output_dir / f"{split}.jsonl") if resume else set() for split in SPLITS
+    }
+    split_handles = {}
+    counts = {
+        "read": 0,
+        "written": 0,
+        "skipped_existing": 0,
+        "complete": 0,
+        "partial_enrichment": 0,
+        "rejected": 0,
+        "batch_errors": 0,
+        "parse_errors": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+    }
+
+    try:
+        with rejected_path.open("a", encoding="utf-8") as rejected:
+            for output_file in output_files:
+                with output_file.open("r", encoding="utf-8") as handle:
+                    for line in handle:
+                        if not line.strip():
+                            continue
+                        counts["read"] += 1
+                        batch_row = json.loads(line)
+                        record_id = extract_batch_record_id(batch_row)
+                        if not record_id or record_id not in index:
+                            counts["parse_errors"] += 1
+                            rejected.write(
+                                json.dumps(
+                                    build_rejection(
+                                        input_a="",
+                                        input_b="",
+                                        split="unknown",
+                                        reason="missing_batch_record_id",
+                                        detail=None,
+                                        outputs=[],
+                                    ),
+                                    ensure_ascii=False,
+                                )
+                                + "\n"
+                            )
+                            continue
+                        indexed = index[record_id]
+                        recipe = indexed["recipe"]
+                        split = indexed["split"]
+                        if recipe_key(recipe) in completed_keys_by_split[split]:
+                            counts["skipped_existing"] += 1
+                            continue
+                        status = batch_row.get("status")
+                        if status:
+                            counts["batch_errors"] += 1
+                            rejected.write(
+                                json.dumps(
+                                    build_rejection(
+                                        input_a=recipe["input_a"],
+                                        input_b=recipe["input_b"],
+                                        split=split,
+                                        reason="batch_row_error",
+                                        detail=json.dumps(status, ensure_ascii=False),
+                                        outputs=recipe.get("outputs", []),
+                                    ),
+                                    ensure_ascii=False,
+                                )
+                                + "\n"
+                            )
+                            continue
+                        usage = extract_batch_token_usage(batch_row)
+                        counts["input_tokens"] += usage.input_tokens
+                        counts["output_tokens"] += usage.output_tokens
+                        counts["total_tokens"] += usage.total_tokens
+                        try:
+                            teacher_enrichment = TeacherEnrichment.model_validate(
+                                json.loads(extract_batch_response_text(batch_row))
+                            )
+                        except (json.JSONDecodeError, ValueError, TypeError) as exc:
+                            counts["parse_errors"] += 1
+                            rejected.write(
+                                json.dumps(
+                                    build_rejection(
+                                        input_a=recipe["input_a"],
+                                        input_b=recipe["input_b"],
+                                        split=split,
+                                        reason="batch_response_parse_error",
+                                        detail=str(exc),
+                                        outputs=recipe.get("outputs", []),
+                                    ),
+                                    ensure_ascii=False,
+                                )
+                                + "\n"
+                            )
+                            continue
+                        record, rejection, _usage = enrich_recipe_from_teacher_enrichment(
+                            recipe=recipe,
+                            split=split,
+                            teacher_enrichment=teacher_enrichment,
+                            config=config,
+                            usage=usage,
+                        )
+                        if record is not None:
+                            if split not in split_handles:
+                                mode = "a" if resume and (output_dir / f"{split}.jsonl").exists() else "w"
+                                split_handles[split] = (output_dir / f"{split}.jsonl").open(
+                                    mode,
+                                    encoding="utf-8",
+                                )
+                            split_handles[split].write(json.dumps(record, ensure_ascii=False) + "\n")
+                            completed_keys_by_split[split].add(recipe_key(recipe))
+                            counts["written"] += 1
+                            counts[record["quality_status"]] += 1
+                        if rejection is not None:
+                            rejected.write(json.dumps(rejection, ensure_ascii=False) + "\n")
+                            counts["rejected"] += 1
+    finally:
+        for handle in split_handles.values():
+            handle.close()
+
+    return counts
+
+
+def read_batch_index(path: Path) -> dict[str, dict]:
+    index = {}
+    with path.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            if not line.strip():
+                continue
+            record = json.loads(line)
+            index[record["record_id"]] = record
+    return index
+
+
+def extract_batch_record_id(batch_row: dict) -> str | None:
+    for text in iter_batch_text_parts(batch_row.get("request", {})):
+        match = re.search(r"Dataset record id:\s*([^\s]+)", text)
+        if match:
+            return match.group(1)
+    return None
+
+
+def extract_batch_response_text(batch_row: dict) -> str:
+    for text in iter_batch_text_parts(batch_row.get("response", {})):
+        return text
+    raise TeacherCallError("Batch response did not include text.")
+
+
+def iter_batch_text_parts(payload: dict):
+    contents = payload.get("contents") or []
+    candidates = payload.get("candidates") or []
+    if candidates:
+        contents = [candidate.get("content", {}) for candidate in candidates]
+    for content in contents:
+        for part in content.get("parts", []):
+            text = part.get("text")
+            if text:
+                yield text
+
+
+def extract_batch_token_usage(batch_row: dict) -> TokenUsage:
+    raw_usage = batch_row.get("response", {}).get("usageMetadata") or {}
+    input_tokens = int(raw_usage.get("promptTokenCount", 0) or raw_usage.get("inputTokens", 0) or 0)
+    output_tokens = int(raw_usage.get("candidatesTokenCount", 0) or raw_usage.get("outputTokens", 0) or 0)
+    total_tokens = int(raw_usage.get("totalTokenCount", 0) or input_tokens + output_tokens)
+    return TokenUsage(input_tokens=input_tokens, output_tokens=output_tokens, total_tokens=total_tokens)
+
+
 def load_recipes(input_path: Path, sample_size: int | None, seed: int) -> list[dict]:
     recipes = []
     rng = random.Random(seed)
@@ -654,6 +1191,88 @@ def main() -> None:
     processed_dir = repo_root / "datasets" / "processed"
     output_dir = repo_root / "datasets" / "enriched" / config.output_dataset_name
     rejected_path = output_dir / "rejected.jsonl"
+
+    if args.mode == "batch-export":
+        if not args.resume and rejected_path.exists():
+            rejected_path.unlink()
+        export_result = export_batch_requests(
+            processed_dir=processed_dir,
+            output_dir=output_dir,
+            splits=args.splits,
+            config=config,
+            limit=args.limit,
+            sample_size=args.sample_size,
+            seed=args.seed,
+            resume=args.resume,
+        )
+        manifest = {
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "mode": args.mode,
+            "config": asdict(config),
+            "splits": args.splits,
+            "limit": args.limit,
+            "sample_size": args.sample_size,
+            "seed": args.seed,
+            "batch_discount": BATCH_DISCOUNT,
+            **export_result,
+        }
+        write_manifest(output_dir / "batch_export_manifest.json", manifest)
+        print(json.dumps(manifest, indent=2, ensure_ascii=False))
+        return
+
+    if args.mode == "batch-submit":
+        if args.batch_job_name:
+            payload = get_batch_job(config=config, repo_root=repo_root, job_name=args.batch_job_name)
+        else:
+            if not args.batch_input_uri:
+                raise ValueError("--batch-input-uri is required with --mode batch-submit.")
+            payload = submit_batch_job(
+                config=config,
+                repo_root=repo_root,
+                input_uri=args.batch_input_uri,
+                output_uri=args.batch_output_uri,
+                display_name=args.batch_display_name,
+            )
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
+        return
+
+    if args.mode == "batch-import":
+        if not args.batch_output_files:
+            raise ValueError("--batch-output-files is required with --mode batch-import.")
+        if not args.resume:
+            if rejected_path.exists():
+                rejected_path.unlink()
+            for split in SPLITS:
+                split_path = output_dir / f"{split}.jsonl"
+                if split_path.exists():
+                    split_path.unlink()
+        index_path = Path(args.batch_index_path) if args.batch_index_path else output_dir / "batch_index.jsonl"
+        counts = import_batch_outputs(
+            output_files=[Path(path) for path in args.batch_output_files],
+            index_path=index_path,
+            output_dir=output_dir,
+            config=config,
+            resume=args.resume,
+        )
+        total_usage = TokenUsage(
+            input_tokens=counts["input_tokens"],
+            output_tokens=counts["output_tokens"],
+            total_tokens=counts["total_tokens"],
+        )
+        manifest = {
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "mode": args.mode,
+            "config": asdict(config),
+            "counts": counts,
+            "batch_output_files": args.batch_output_files,
+            "batch_index_path": str(index_path),
+            "token_usage": asdict(total_usage),
+            "estimated_realtime_cost_usd": round(estimate_cost(total_usage, config), 6),
+            "estimated_batch_cost_usd": round(estimate_cost(total_usage, config) * BATCH_DISCOUNT, 6),
+        }
+        write_manifest(output_dir / "batch_import_manifest.json", manifest)
+        print(json.dumps(manifest, indent=2, ensure_ascii=False))
+        return
 
     teacher = VertexStructuredTeacher(config, repo_root)
     if not args.resume and rejected_path.exists():

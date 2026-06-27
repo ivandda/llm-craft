@@ -1,3 +1,5 @@
+import json
+
 from src.data.enrich_teacher import (
     StructuredEnrichmentConfig,
     TeacherCallError,
@@ -9,6 +11,8 @@ from src.data.enrich_teacher import (
     enrich_recipe,
     enrich_split,
     estimate_cost,
+    export_batch_requests,
+    import_batch_outputs,
     load_recipes,
 )
 
@@ -298,3 +302,163 @@ def test_strict_prompt_includes_rejection_decision_process():
     assert "If unsure, omit the output" in prompt
     assert "Do not use numeric scores" in prompt
     assert "cat + ocean -> fish" in prompt
+
+
+def test_export_batch_requests_writes_request_and_index(tmp_path):
+    processed_dir = tmp_path / "processed"
+    output_dir = tmp_path / "enriched"
+    processed_dir.mkdir()
+    (processed_dir / "recipes_train.jsonl").write_text(
+        '{"input_a": "fire", "input_b": "water", "outputs": ["steam"]}\n',
+        encoding="utf-8",
+    )
+
+    result = export_batch_requests(
+        processed_dir=processed_dir,
+        output_dir=output_dir,
+        splits=["train"],
+        config=StructuredEnrichmentConfig(
+            model="gemini-2.5-flash",
+            prompt_style="strict",
+            target_num_outputs=5,
+        ),
+        limit=None,
+        sample_size=None,
+        seed=13,
+        resume=True,
+    )
+
+    assert result["counts"]["requests_written"] == 1
+    request = json.loads((output_dir / "batch_requests.jsonl").read_text(encoding="utf-8"))
+    index = json.loads((output_dir / "batch_index.jsonl").read_text(encoding="utf-8"))
+    request_text = request["request"]["contents"][0]["parts"][0]["text"]
+    assert "Dataset record id: train:00000001" in request_text
+    assert request["request"]["generationConfig"]["responseMimeType"] == "application/json"
+    assert request["request"]["generationConfig"]["responseSchema"]["properties"]["candidate_outputs"]
+    assert index["record_id"] == "train:00000001"
+    assert index["recipe"]["outputs"] == ["steam"]
+
+
+def test_import_batch_outputs_writes_ranked_records_and_rejections(tmp_path):
+    output_dir = tmp_path / "enriched"
+    output_dir.mkdir()
+    index_path = output_dir / "batch_index.jsonl"
+    index_path.write_text(
+        json.dumps(
+            {
+                "record_id": "train:00000001",
+                "split": "train",
+                "recipe": {"input_a": "fire", "input_b": "water", "outputs": ["steam"]},
+            }
+        )
+        + "\n"
+        + json.dumps(
+            {
+                "record_id": "train:00000002",
+                "split": "train",
+                "recipe": {"input_a": "cat", "input_b": "ocean", "outputs": ["fish"]},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    batch_output_path = tmp_path / "batch_output.jsonl"
+    batch_output_path.write_text(
+        json.dumps(
+            {
+                "request": {
+                    "contents": [
+                        {
+                            "parts": [
+                                {"text": "Dataset record id: train:00000001\nInput A: fire"}
+                            ]
+                        }
+                    ]
+                },
+                "response": {
+                    "candidates": [
+                        {
+                            "content": {
+                                "parts": [
+                                    {
+                                        "text": json.dumps(
+                                            {
+                                                "keep_recipe": True,
+                                                "candidate_outputs": [
+                                                    {
+                                                        "output": "steam",
+                                                        "rationale": "Fire heats water into vapor.",
+                                                        "source": "observed",
+                                                    },
+                                                    {
+                                                        "output": "hot spring",
+                                                        "rationale": "Heat and water form a hot spring.",
+                                                        "source": "teacher",
+                                                    },
+                                                ],
+                                            }
+                                        )
+                                    }
+                                ]
+                            }
+                        }
+                    ],
+                    "usageMetadata": {
+                        "promptTokenCount": 10,
+                        "candidatesTokenCount": 20,
+                        "totalTokenCount": 30,
+                    },
+                },
+            }
+        )
+        + "\n"
+        + json.dumps(
+            {
+                "request": {
+                    "contents": [
+                        {
+                            "parts": [
+                                {"text": "Dataset record id: train:00000002\nInput A: cat"}
+                            ]
+                        }
+                    ]
+                },
+                "status": {"code": 3, "message": "bad request"},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    counts = import_batch_outputs(
+        output_files=[batch_output_path],
+        index_path=index_path,
+        output_dir=output_dir,
+        config=StructuredEnrichmentConfig(model="gemini-2.5-flash"),
+        resume=True,
+    )
+
+    assert counts["written"] == 1
+    assert counts["batch_errors"] == 1
+    record = json.loads((output_dir / "train.jsonl").read_text(encoding="utf-8"))
+    assert record["candidate_outputs"] == [
+        {
+            "output": "steam",
+            "source": "observed",
+            "rationale": "Fire heats water into vapor.",
+            "rank": 1,
+        },
+        {
+            "output": "hot spring",
+            "source": "teacher",
+            "rationale": "Heat and water form a hot spring.",
+            "rank": 2,
+        },
+    ]
+    assert record["metadata"]["token_usage"] == {
+        "input_tokens": 10,
+        "output_tokens": 20,
+        "total_tokens": 30,
+    }
+    rejected = (output_dir / "rejected.jsonl").read_text(encoding="utf-8")
+    assert "batch_row_error" in rejected

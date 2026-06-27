@@ -161,8 +161,8 @@ scripts are still useful as smaller isolated stages, but the one-call path is si
 dataset construction and cost measurement.
 
 ### Recommended Structured Teacher Enrichment (`enrich_teacher.py`)
-Generates `datasets/enriched/dataset_03_teacher_structured_enriched/` from the minimal
-recipe split files. It uses Gemini 2.5 Flash-Lite by default and asks the teacher to:
+Generates `datasets/enriched/dataset_04_teacher_ranked_flash_strict_v2/` from the minimal
+recipe split files. It uses Gemini 2.5 Flash with the strict prompt by default and asks the teacher to:
 
 * keep only observed outputs that make sense for the input pair,
 * add new alternatives only when they are genuinely plausible,
@@ -172,9 +172,8 @@ recipe split files. It uses Gemini 2.5 Flash-Lite by default and asks the teache
 
 Records with fewer than `target_num_outputs` candidates are marked `partial_enrichment`.
 This is expected and valid. Whole-recipe rejections are written to `rejected.jsonl`, not the
-enriched split file. The script writes a manifest with token usage and estimated realtime
-Flash-Lite cost. Candidate order is stored as a programmatic `rank` field. The teacher does
-not emit numeric scores.
+enriched split file. The script writes manifests with token usage and estimated cost. Candidate
+order is stored as a programmatic `rank` field. The teacher does not emit numeric scores.
 
 ```bash
 # Development smoke test
@@ -183,6 +182,29 @@ uv run python -m src.data.enrich_teacher --splits train --limit 10 --no-resume
 # Cost/quality sample before a larger run
 uv run python -m src.data.enrich_teacher --splits train --limit 100 --no-resume
 ```
+
+For the full dataset, use Vertex AI batch:
+
+```bash
+# Export local batch_requests.jsonl and batch_index.jsonl.
+uv run python -m src.data.enrich_teacher --mode batch-export --no-resume
+
+# Upload batch_requests.jsonl to GCS, then submit the job.
+uv run python -m src.data.enrich_teacher \
+  --mode batch-submit \
+  --batch-input-uri gs://BUCKET/PREFIX/batch_requests.jsonl \
+  --batch-output-uri gs://BUCKET/PREFIX/batch_output \
+  --batch-display-name llm-craft-teacher-ranked-v2
+
+# After Vertex finishes, download the output JSONL and postprocess it.
+uv run python -m src.data.enrich_teacher \
+  --mode batch-import \
+  --batch-output-files /path/to/downloaded/batch_output.jsonl
+```
+
+Batch output is raw model output. Postprocessing reads `batch_index.jsonl`, validates the structured
+response, adds `rank`, `quality_status`, metadata, token usage, and writes final split files plus
+`rejected.jsonl`. The LLM does not write dataset metadata.
 
 Output folders:
 * **`dataset_00_recipes_baseline_multi_output/`**: organized copy of `recipes_train/dev/test.jsonl`.

@@ -89,18 +89,20 @@ rationale_enrichment:
   max_rationale_words: 24
 
 # Paso 5 recomendado: enrichment estructurado en una sola llamada.
-# Usa Gemini Flash-Lite para empezar con bajo costo. Acepta registros parciales:
-# nunca fuerza alternativas cuando el teacher no encuentra buenas respuestas.
+# Para el dataset final usar Gemini 2.5 Flash en modo batch con prompt strict.
+# Acepta registros parciales: nunca fuerza alternativas cuando el teacher no
+# encuentra buenas respuestas.
 structured_enrichment:
   provider: "google_vertex_ai"
-  model: "gemini-2.5-flash-lite"
+  model: "gemini-2.5-flash"
   location: "us-central1"
   input_dataset_name: "recipes"
-  output_dataset_name: "dataset_03_teacher_structured_enriched"
+  output_dataset_name: "dataset_04_teacher_ranked_flash_strict_v2"
   target_num_outputs: 5
   prompt_version: "teacher_structured_enrichment_v2"
+  prompt_style: "strict"
   max_retries: 2
   temperature: 0.4
   max_rationale_words: 24
-  input_price_per_million_tokens: 0.10
-  output_price_per_million_tokens: 0.40
+  input_price_per_million_tokens: 0.30
+  output_price_per_million_tokens: 2.50
