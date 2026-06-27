@@ -1,4 +1,5 @@
 import json
+import sys
 
 import pytest
 
@@ -7,6 +8,7 @@ from src.data.enrich_multi_output import (
     TeacherResponseError,
     build_enriched_record,
     enrich_recipe,
+    parse_args,
     parse_teacher_outputs,
 )
 
@@ -123,3 +125,10 @@ def test_enrich_recipe_discards_duplicate_teacher_outputs_and_marks_partial():
 def test_parse_teacher_outputs_rejects_invalid_json():
     with pytest.raises(TeacherResponseError):
         parse_teacher_outputs("mist, vapor, sauna")
+
+
+def test_parse_args_rejects_dry_run(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["enrich_multi_output", "--dry-run"])
+
+    with pytest.raises(SystemExit):
+        parse_args()

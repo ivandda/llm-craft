@@ -20,8 +20,8 @@ src/data/export_sft.py    src/data/export_eval.py
 [recipes_{split}.jsonl]     [eval_{split}_{size}.jsonl]
 ```
 
-El enriquecimiento con un modelo teacher es una etapa manual posterior. No se ejecuta desde
-`run_pipeline.py` para evitar costos accidentales de API.
+Teacher enrichment is a later manual stage. It is intentionally not executed from
+`run_pipeline.py` to avoid accidental API costs.
 
 ---
 
@@ -186,6 +186,34 @@ Example enriched record:
 }
 ```
 
+Run `enrich_multi_output.py` from the repository root. This step calls the teacher model for
+recipes that need additional candidate outputs.
+
+```bash
+# Minimal real smoke runs by split
+uv run python -m src.data.enrich_multi_output --splits train --limit 3
+uv run python -m src.data.enrich_multi_output --splits dev --limit 3
+uv run python -m src.data.enrich_multi_output --splits test --limit 3
+
+# Regenerate a small split sample from scratch
+uv run python -m src.data.enrich_multi_output --splits train --limit 3 --no-resume
+
+# Run one complete split
+uv run python -m src.data.enrich_multi_output --splits train
+uv run python -m src.data.enrich_multi_output --splits dev
+uv run python -m src.data.enrich_multi_output --splits test
+
+# Run all splits, resuming already generated records
+uv run python -m src.data.enrich_multi_output
+
+# Run all splits from scratch
+uv run python -m src.data.enrich_multi_output --no-resume
+```
+
+`--resume` is enabled by default. With resume enabled, the script skips input pairs already
+present in the output split file and does not call the LLM for those pairs. Use `--no-resume`
+only when you intentionally want to overwrite and regenerate the selected output files.
+
 ### 4. Teacher Rationale Enrichment (`enrich_rationales.py`)
 Adds one concise rationale to each existing `candidate_output` in
 `dataset_01_teacher_enriched_multi_output_no_rationale/`. This stage does not generate new
@@ -228,6 +256,35 @@ Example rationale-enriched record:
 }
 ```
 
+Run `enrich_rationales.py` after `dataset_01_teacher_enriched_multi_output_no_rationale/`
+exists. This step calls the teacher model to explain existing candidates; it does not create
+new outputs.
+
+```bash
+# Minimal real smoke runs by split
+uv run python -m src.data.enrich_rationales --splits train --limit 3
+uv run python -m src.data.enrich_rationales --splits dev --limit 3
+uv run python -m src.data.enrich_rationales --splits test --limit 3
+
+# Regenerate a small split sample from scratch
+uv run python -m src.data.enrich_rationales --splits dev --limit 3 --no-resume
+
+# Run one complete split
+uv run python -m src.data.enrich_rationales --splits train
+uv run python -m src.data.enrich_rationales --splits dev
+uv run python -m src.data.enrich_rationales --splits test
+
+# Run all splits, resuming already completed rationale records
+uv run python -m src.data.enrich_rationales
+
+# Run all splits from scratch
+uv run python -m src.data.enrich_rationales --no-resume
+```
+
+For rationale enrichment, resume skips a record only when the output already contains all
+rationales for that input pair. If a record is missing any rationale, the script will call the
+LLM again for that record.
+
 ---
 
 ## Running the Pipeline
@@ -252,13 +309,4 @@ uv run python -m src.data.export_sft
 
 # Step 4: Export structured evaluation datasets
 uv run python -m src.data.export_eval
-
-# Optional manual smoke test without API calls
-uv run python -m src.data.enrich_multi_output --splits dev --limit 3 --dry-run
-
-# Optional minimal real teacher smoke test
-uv run python -m src.data.enrich_multi_output --splits dev --limit 3
-
-# Optional minimal real rationale smoke test
-uv run python -m src.data.enrich_rationales --splits dev --limit 3 --no-resume
 ```

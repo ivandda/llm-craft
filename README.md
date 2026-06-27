@@ -62,14 +62,9 @@ uv run python -m src.data.export_eval
 ### 5. Enriquecimiento con Teacher (manual)
 Genera un dataset derivado agrupado con hasta cinco salidas por receta, sin rationales. Conserva las salidas observadas de `recipes_train/dev/test.jsonl` y usa Gemini 2.5 Flash solo para completar alternativas faltantes.
 
-Smoke test sin llamadas al LLM:
-```bash
-uv run python -m src.data.enrich_multi_output --splits dev --limit 3 --dry-run
-```
-
 Smoke test real mínimo:
 ```bash
-uv run python -m src.data.enrich_multi_output --splits dev --limit 3
+uv run python -m src.data.enrich_multi_output --splits train --limit 3
 ```
 
 La generación completa queda como paso manual para controlar costo:
@@ -82,7 +77,7 @@ Agrega una explicación breve a cada `candidate_output` del dataset multi-salida
 
 Smoke test real mínimo:
 ```bash
-uv run python -m src.data.enrich_rationales --splits dev --limit 3 --no-resume
+uv run python -m src.data.enrich_rationales --splits train --limit 3 --no-resume
 ```
 
 La generación completa queda como paso manual para controlar costo:

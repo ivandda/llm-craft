@@ -84,17 +84,6 @@ class VertexGeminiTeacher:
         return _message_content_to_text(response.content)
 
 
-class DryRunTeacher:
-    def generate(
-        self,
-        input_a: str,
-        input_b: str,
-        existing_outputs: list[str],
-        num_outputs: int,
-    ) -> str:
-        return json.dumps({"outputs": []})
-
-
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Build a grouped multi-output recipe dataset enriched with a teacher model."
@@ -111,11 +100,6 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=None,
         help="Optional maximum records per split for smoke tests.",
-    )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Do not call the teacher; write observed outputs only and mark incomplete rows as partial.",
     )
     parser.add_argument(
         "--resume",
@@ -441,7 +425,7 @@ def main() -> None:
     output_dir = enriched_dir / config.output_dataset_name
     failed_path = output_dir / "failed_generations.jsonl"
 
-    teacher: Teacher = DryRunTeacher() if args.dry_run else VertexGeminiTeacher(config, repo_root)
+    teacher = VertexGeminiTeacher(config, repo_root)
     if not args.resume and failed_path.exists():
         failed_path.unlink()
 
@@ -473,7 +457,6 @@ def main() -> None:
         "config": asdict(config),
         "splits": split_counts,
         "baseline_splits": baseline_counts,
-        "dry_run": args.dry_run,
         "limit": args.limit,
         "input_files": [str(processed_dir / f"recipes_{split}.jsonl") for split in args.splits],
     }
