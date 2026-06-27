@@ -60,3 +60,15 @@ evaluation_export:
   sizes:
     dev_keep: all
     test_keep: all
+
+# Paso 5: Enriquecimiento teacher multi-salida (no incluido en run_pipeline.py)
+enrichment:
+  provider: "google_vertex_ai"
+  model: "gemini-2.5-flash"
+  location: "us-central1"
+  input_dataset_name: "recipes"
+  output_dataset_name: "dataset_01_teacher_enriched_multi_output_no_rationale"
+  target_num_outputs: 5
+  prompt_version: "teacher_multi_output_no_rationale_v1"
+  max_retries: 2
+  temperature: 0.7

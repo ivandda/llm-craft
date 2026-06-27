@@ -59,6 +59,24 @@ uv run python -m src.data.export_eval
 * **Qué hace**: Utiliza *Reservoir Sampling* de un solo paso de lectura para extraer muestras aleatorias deterministas (`eval_dev_1k`, `eval_test_1k`, etc.) con bajo uso de memoria. Cada registro es mínimo y lista las respuestas válidas conocidas (`known_outputs`) asociadas al par.
 * **Tamaño completo**: En `evaluation_export.sizes`, usar `all` en lugar de un número para exportar todo el split (`eval_dev_all.jsonl`, `eval_test_all.jsonl`).
 
+### 5. Enriquecimiento con Teacher (manual)
+Genera un dataset derivado agrupado con hasta cinco salidas por receta, sin rationales. Conserva las salidas observadas de `recipes_train/dev/test.jsonl` y usa Gemini 2.5 Flash solo para completar alternativas faltantes.
+
+Smoke test sin llamadas al LLM:
+```bash
+uv run python -m src.data.enrich_multi_output --splits dev --limit 3 --dry-run
+```
+
+Smoke test real mínimo:
+```bash
+uv run python -m src.data.enrich_multi_output --splits dev --limit 3
+```
+
+La generación completa queda como paso manual para controlar costo:
+```bash
+uv run python -m src.data.enrich_multi_output
+```
+
 ---
 
 ## SFT y Google Colab

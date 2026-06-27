@@ -20,6 +20,9 @@ src/data/export_sft.py    src/data/export_eval.py
 [recipes_{split}.jsonl]     [eval_{split}_{size}.jsonl]
 ```
 
+El enriquecimiento con un modelo teacher es una etapa manual posterior. No se ejecuta desde
+`run_pipeline.py` para evitar costos accidentales de API.
+
 ---
 
 ## Cleaning & Canonicalization Design
@@ -146,6 +149,42 @@ The resulting files use `all` in the name, for example `eval_dev_all.jsonl` and 
 ```
 *During scoring, a student prediction is evaluated against the entire list of `known_outputs` to reward legitimate alternative outputs.*
 
+### 3. Teacher Multi-Output Enrichment (`enrich_multi_output.py`)
+Generates grouped derived datasets under `datasets/enriched/` from the minimal recipe files.
+This first enrichment stage does **not** include rationales. It preserves existing observed
+outputs and calls the teacher only when a recipe has fewer than five valid outputs.
+
+Output folders:
+* **`dataset_00_recipes_baseline_multi_output/`**: organized copy of `recipes_train/dev/test.jsonl`.
+* **`dataset_01_teacher_enriched_multi_output_no_rationale/`**: grouped candidate outputs with
+  `source: "observed"` or `source: "teacher"`.
+
+Example enriched record:
+
+```json
+{
+  "input_a": "fire",
+  "input_b": "water",
+  "candidate_outputs": [
+    {"output": "steam", "source": "observed"},
+    {"output": "mist", "source": "observed"},
+    {"output": "vapor", "source": "teacher"},
+    {"output": "hot spring", "source": "teacher"},
+    {"output": "sauna", "source": "teacher"}
+  ],
+  "quality_status": "complete",
+  "metadata": {
+    "source_dataset": "recipes",
+    "source_split": "train",
+    "teacher_provider": "google_vertex_ai",
+    "teacher_model": "gemini-2.5-flash",
+    "enrichment_version": "teacher_multi_output_no_rationale_v1",
+    "target_num_outputs": 5,
+    "has_rationales": false
+  }
+}
+```
+
 ---
 
 ## Running the Pipeline
@@ -170,4 +209,10 @@ uv run python -m src.data.export_sft
 
 # Step 4: Export structured evaluation datasets
 uv run python -m src.data.export_eval
+
+# Optional manual smoke test without API calls
+uv run python -m src.data.enrich_multi_output --splits dev --limit 3 --dry-run
+
+# Optional minimal real teacher smoke test
+uv run python -m src.data.enrich_multi_output --splits dev --limit 3
 ```
