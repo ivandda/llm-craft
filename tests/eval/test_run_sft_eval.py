@@ -61,4 +61,4 @@ def test_parse_args_defaults_to_dev_eval_set(monkeypatch):
 
     args = parse_args()
 
-    assert args.eval_file == "datasets/processed/eval_dev_1k.jsonl"
+    assert args.eval_file == "datasets/processed/eval_dev_all.jsonl"

@@ -8,7 +8,7 @@ normalization:
   raw_datasets:
     ericlewis: true
     elementia: true
-    expitau: true
+    expitau: false
     redfast00: true
 
 # Paso 2: Limpieza y Splits (clean.py)
@@ -26,7 +26,7 @@ cleaning:
   require_trusted_vocab_for_untrusted: true
   reject_sample_limit: 500
   quality:
-    max_words: 3
+    max_words: 2
     max_chars: 36
     min_token_chars: 2
     reject_digits: true
@@ -60,3 +60,49 @@ evaluation_export:
   sizes:
     dev_keep: all
     test_keep: all
+
+# Pasos manuales con llamada a LLM:
+
+# Paso 5: Enriquecimiento teacher multi-salida (no incluido en run_pipeline.py)
+enrichment:
+  provider: "google_vertex_ai"
+  model: "gemini-2.5-flash"
+  location: "us-central1"
+  input_dataset_name: "recipes"
+  output_dataset_name: "dataset_01_teacher_enriched_multi_output_no_rationale"
+  target_num_outputs: 5
+  prompt_version: "teacher_multi_output_no_rationale_v1"
+  max_retries: 2
+  temperature: 0.7
+
+# Paso 6: Rationales teacher para dataset multi-salida (no incluido en run_pipeline.py)
+rationale_enrichment:
+  provider: "google_vertex_ai"
+  model: "gemini-2.5-flash"
+  location: "us-central1"
+  input_dataset_name: "dataset_01_teacher_enriched_multi_output_no_rationale"
+  output_dataset_name: "dataset_02_teacher_enriched_multi_output_with_rationale"
+  prompt_version: "teacher_multi_output_with_rationale_v1"
+  rationale_language: "en"
+  max_retries: 2
+  temperature: 0.4
+  max_rationale_words: 24
+
+# Paso 5 recomendado: enrichment estructurado en una sola llamada.
+# Para el dataset final usar Gemini 2.5 Flash en modo batch con prompt strict.
+# Acepta registros parciales: nunca fuerza alternativas cuando el teacher no
+# encuentra buenas respuestas.
+structured_enrichment:
+  provider: "google_vertex_ai"
+  model: "gemini-2.5-flash"
+  location: "us-central1"
+  input_dataset_name: "recipes"
+  output_dataset_name: "dataset_04_teacher_ranked_flash_strict_v2"
+  target_num_outputs: 5
+  prompt_version: "teacher_structured_enrichment_v2"
+  prompt_style: "strict"
+  max_retries: 2
+  temperature: 0.4
+  max_rationale_words: 24
+  input_price_per_million_tokens: 0.30
+  output_price_per_million_tokens: 2.50

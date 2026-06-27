@@ -56,8 +56,69 @@ Genera los datasets estructurados con respuestas alternativas válidas conocidas
 ```bash
 uv run python -m src.data.export_eval
 ```
-* **Qué hace**: Utiliza *Reservoir Sampling* de un solo paso de lectura para extraer muestras aleatorias deterministas (`eval_dev_1k`, `eval_test_1k`, etc.) con bajo uso de memoria. Cada registro es mínimo y lista las respuestas válidas conocidas (`known_outputs`) asociadas al par.
+* **Qué hace**: Utiliza *Reservoir Sampling* de un solo paso de lectura para extraer muestras aleatorias deterministas o exportar el split completo, según `evaluation_export.sizes`. Cada registro es mínimo y lista las respuestas válidas conocidas (`known_outputs`) asociadas al par.
 * **Tamaño completo**: En `evaluation_export.sizes`, usar `all` en lugar de un número para exportar todo el split (`eval_dev_all.jsonl`, `eval_test_all.jsonl`).
+
+### 5. Enriquecimiento con Teacher (manual)
+Genera un dataset derivado agrupado con hasta cinco salidas por receta, sin rationales. Conserva las salidas observadas de `recipes_train/dev/test.jsonl` y usa Gemini 2.5 Flash solo para completar alternativas faltantes.
+
+Camino recomendado actual: enriquecimiento estructurado en una sola llamada con Gemini 2.5 Flash. El teacher conserva salidas observadas buenas, agrega alternativas solo si son plausibles, ordena candidatos de mejor a peor receta y escribe rationales breves para todas las salidas aceptadas. Los registros parciales son válidos: no se fuerzan respuestas.
+
+Smoke test real mínimo durante desarrollo:
+```bash
+uv run python -m src.data.enrich_teacher --splits train --limit 10 --no-resume
+```
+
+Prueba de costo/calidad:
+```bash
+uv run python -m src.data.enrich_teacher --splits train --limit 100 --no-resume
+```
+
+El script realtime escribe `datasets/enriched/dataset_04_teacher_ranked_flash_strict_v2/manifest.json` con uso de tokens y costo estimado. Las recetas rechazadas van a `rejected.jsonl`.
+
+Para el dataset completo, usar batch de Vertex AI:
+```bash
+# 1. Exportar requests locales y el índice de postproceso
+uv run python -m src.data.enrich_teacher --mode batch-export --no-resume
+
+# 2. Subir datasets/enriched/dataset_04_teacher_ranked_flash_strict_v2/batch_requests.jsonl a GCS
+#    y lanzar el batch. Reemplazar bucket/prefix.
+uv run python -m src.data.enrich_teacher \
+  --mode batch-submit \
+  --batch-input-uri gs://BUCKET/PREFIX/batch_requests.jsonl \
+  --batch-output-uri gs://BUCKET/PREFIX/batch_output \
+  --batch-display-name llm-craft-teacher-ranked-v2
+
+# 3. Descargar el JSONL generado por Vertex y convertirlo al dataset enriquecido
+uv run python -m src.data.enrich_teacher \
+  --mode batch-import \
+  --batch-output-files /path/to/downloaded/batch_output.jsonl
+```
+
+El LLM solo devuelve `keep_recipe`, `reject_reason` y `candidate_outputs`. El código agrega `rank`, `quality_status`, metadata, uso de tokens y costo estimado. Batch tiene descuento aproximado de 50%; el manifest de import escribe costo realtime y costo batch estimado.
+
+Smoke test real mínimo:
+```bash
+uv run python -m src.data.enrich_multi_output --splits train --limit 3
+```
+
+La generación completa queda como paso manual para controlar costo:
+```bash
+uv run python -m src.data.enrich_multi_output
+```
+
+### 6. Rationales con Teacher (manual)
+Agrega una explicación breve a cada `candidate_output` del dataset multi-salida ya generado. No crea nuevas salidas: valida que el teacher mantenga exactamente los outputs existentes y escribe el resultado en `datasets/enriched/dataset_02_teacher_enriched_multi_output_with_rationale/`.
+
+Smoke test real mínimo:
+```bash
+uv run python -m src.data.enrich_rationales --splits train --limit 3 --no-resume
+```
+
+La generación completa queda como paso manual para controlar costo:
+```bash
+uv run python -m src.data.enrich_rationales
+```
 
 ---
 
@@ -78,7 +139,7 @@ uv run python -m src.sft.prepare_train_eval_data \
 
 ### Crear zip para Colab
 
-El zip incluye `datasets/processed/eval_dev_1k.jsonl` para evaluacion batch.
+El zip incluye `datasets/processed/eval_dev_all.jsonl` para evaluacion batch.
 Si todavia no existe, generarlo con:
 
 ```bash
@@ -125,14 +186,14 @@ uv run python -m src.sft.predict \
 
 ### Evaluación batch
 
-Durante el desarrollo, usar `eval_dev_1k.jsonl` para comparar variantes sin tocar el test final.
+Durante el desarrollo, usar `eval_dev_all.jsonl` para comparar variantes sin tocar el test final.
 Si falta ese archivo, correr primero `uv run python -m src.data.export_eval`.
 
 Evaluar el modelo base contra respuestas conocidas de dev:
 
 ```bash
 uv run python -m src.eval.run_sft_eval \
-  --eval-file datasets/processed/eval_dev_1k.jsonl \
+  --eval-file datasets/processed/eval_dev_all.jsonl \
   --output-file artifacts/eval/smollm2-base-dev.jsonl \
   --model-name HuggingFaceTB/SmolLM2-135M-Instruct
 ```
@@ -141,7 +202,7 @@ Evaluar un adapter LoRA entrenado en dev:
 
 ```bash
 uv run python -m src.eval.run_sft_eval \
-  --eval-file datasets/processed/eval_dev_1k.jsonl \
+  --eval-file datasets/processed/eval_dev_all.jsonl \
   --output-file artifacts/eval/smollm2-clean-lora-dev.jsonl \
   --adapter-dir artifacts/sft/smollm2-clean-lora
 ```
@@ -149,7 +210,7 @@ uv run python -m src.eval.run_sft_eval \
 El comando genera un JSONL con predicciones por ejemplo e imprime métricas agregadas:
 `canonical_accuracy`, `known_output_accuracy` y `empty_predictions`.
 
-Reservar `eval_test_1k.jsonl` para la evaluación final.
+Reservar `eval_test_all.jsonl` para la evaluación final.
 
 La guía completa está en [sft_training_colab.md](docs/codigo/sft_training_colab.md).
 
@@ -186,3 +247,36 @@ Para más detalles teóricos y de diseño, consulte:
 * [sft_training_colab.md](docs/codigo/sft_training_colab.md): Comandos para preparar muestras SFT, empaquetar Colab, entrenar y predecir.
 * [frontend_next_app.md](docs/codigo/frontend_next_app.md): Guía para ejecutar, validar y extender la app Next.js jugable.
 * [destilacion_creatividad_composicional.md](docs/informe/destilacion_creatividad_composicional.md): Paper de diseño del proyecto de investigación.
+
+
+---
+
+# Batch info:
+
+```bash
+(llm-craft) ➜  llm-craft git:(feature/enrich-dataset) ✗ uv run python -m src.data.enrich_teacher \
+  --mode batch-submit \
+  --batch-input-uri gs://llm-craft-nlp2026-498021/batch_input/batch_requests.jsonl \
+  --batch-output-uri gs://llm-craft-nlp2026-498021/batch_output/ \
+  --batch-display-name llm-craft-teacher-ranked-v2
+{
+  "name": "projects/486944883203/locations/us-central1/batchPredictionJobs/612764435819266048",
+  "display_name": "llm-craft-teacher-ranked-v2",
+  "state": "JOB_STATE_PENDING",
+  "create_time": "2026-06-27T20:06:18.146878Z",
+  "update_time": "2026-06-27T20:06:18.146878Z",
+  "model": "publishers/google/models/gemini-2.5-flash",
+  "src": {
+    "format": "jsonl",
+    "gcs_uri": [
+      "gs://llm-craft-nlp2026-498021/batch_input/batch_requests.jsonl"
+    ]
+  },
+  "dest": {
+    "format": "jsonl",
+    "gcs_uri": "gs://llm-craft-nlp2026-498021/batch_output/"
+  },
+  "is_terminal_state": false
+}
+(llm-craft) ➜  llm-craft git:(feature/enrich-dataset) ✗ 
+```

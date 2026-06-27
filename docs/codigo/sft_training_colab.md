@@ -48,12 +48,12 @@ El script `src/sft/create_colab_zip.py` arma un zip chico con:
 - `README.md`
 - `docs/`
 - los JSONL de train y eval indicados
-- `datasets/processed/eval_dev_1k.jsonl` para evaluacion batch durante desarrollo
+- `datasets/processed/eval_dev_all.jsonl` para evaluacion batch durante desarrollo
 
 No incluye `.venv`, caches, checkpoints ni modelos entrenados.
 
 Antes de crear el zip, asegurate de que exista
-`datasets/processed/eval_dev_1k.jsonl`. Si falta, generalo con:
+`datasets/processed/eval_dev_all.jsonl`. Si falta, generalo con:
 
 ```bash
 uv run python -m src.data.run_pipeline
@@ -170,12 +170,12 @@ Return only the resulting concept."
 ## 7. Evaluar en batch
 
 Evaluar el adapter entrenado contra el set dev estructurado con respuestas conocidas:
-si `datasets/processed/eval_dev_1k.jsonl` no existe, correr primero
+si `datasets/processed/eval_dev_all.jsonl` no existe, correr primero
 `uv run python -m src.data.export_eval`.
 
 ```bash
 !uv run python -m src.eval.run_sft_eval \
-  --eval-file datasets/processed/eval_dev_1k.jsonl \
+  --eval-file datasets/processed/eval_dev_all.jsonl \
   --output-file artifacts/eval/smollm2-clean-lora-dev.jsonl \
   --adapter-dir artifacts/sft/smollm2-clean-lora
 ```
@@ -184,7 +184,7 @@ Para una prueba rapida antes de correr el set completo:
 
 ```bash
 !uv run python -m src.eval.run_sft_eval \
-  --eval-file datasets/processed/eval_dev_1k.jsonl \
+  --eval-file datasets/processed/eval_dev_all.jsonl \
   --output-file artifacts/eval/smollm2-clean-lora-smoke.jsonl \
   --adapter-dir artifacts/sft/smollm2-clean-lora \
   --limit 5
@@ -193,11 +193,11 @@ Para una prueba rapida antes de correr el set completo:
 El comando escribe un JSONL con una prediccion por par e imprime:
 `canonical_accuracy`, `known_output_accuracy` y `empty_predictions`.
 
-Reservar `eval_test_1k.jsonl` para la corrida final del experimento:
+Reservar `eval_test_all.jsonl` para la corrida final del experimento:
 
 ```bash
 !uv run python -m src.eval.run_sft_eval \
-  --eval-file datasets/processed/eval_test_1k.jsonl \
+  --eval-file datasets/processed/eval_test_all.jsonl \
   --output-file artifacts/eval/smollm2-clean-lora-final-test.jsonl \
   --adapter-dir artifacts/sft/smollm2-clean-lora
 ```

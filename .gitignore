@@ -1,4 +1,8 @@
+datasets/reports/*
 datasets/processed/*
+datasets/processed_old/*
+datasets/processed_no_expitau/*
+datasets/enriched/*
 DS_Store
 .DS_Store
 secrets/*

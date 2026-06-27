@@ -1,7 +1,7 @@
 import os
 import sys
 from dotenv import load_dotenv
-from langchain_google_vertexai import ChatVertexAI
+from langchain_google_genai import ChatGoogleGenerativeAI
 from deepagents import create_deep_agent
 
 def main():
@@ -32,8 +32,9 @@ def main():
     
     # 2. Initialize the Vertex AI Chat model (Gemini 2.5 Flash)
     try:
-        llm = ChatVertexAI(
-            model_name="gemini-2.5-flash",
+        llm = ChatGoogleGenerativeAI(
+            model="gemini-2.5-flash",
+            vertexai=True,
             project=project_id,
             location="us-central1"
         )
