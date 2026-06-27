@@ -155,6 +155,35 @@ Generates grouped derived datasets under `datasets/enriched/` from the minimal r
 This first enrichment stage does **not** include rationales. It preserves existing observed
 outputs and calls the teacher only when a recipe has fewer than five valid outputs.
 
+The recommended current path is `src/data/enrich_teacher.py`, which does the teacher review,
+optional alternatives, and rationales in one structured-output call. The older two-step
+scripts are still useful as smaller isolated stages, but the one-call path is simpler for
+dataset construction and cost measurement.
+
+### Recommended Structured Teacher Enrichment (`enrich_teacher.py`)
+Generates `datasets/enriched/dataset_03_teacher_structured_enriched/` from the minimal
+recipe split files. It uses Gemini 2.5 Flash-Lite by default and asks the teacher to:
+
+* keep only observed outputs that make sense for the input pair,
+* add new alternatives only when they are genuinely plausible,
+* avoid forcing a fixed number of answers,
+* write one short rationale for each accepted output,
+* order accepted candidates from strongest to weakest recipe.
+
+Records with fewer than `target_num_outputs` candidates are marked `partial_enrichment`.
+This is expected and valid. Whole-recipe rejections are written to `rejected.jsonl`, not the
+enriched split file. The script writes a manifest with token usage and estimated realtime
+Flash-Lite cost. Candidate order is stored as a programmatic `rank` field. The teacher does
+not emit numeric scores.
+
+```bash
+# Development smoke test
+uv run python -m src.data.enrich_teacher --splits train --limit 10 --no-resume
+
+# Cost/quality sample before a larger run
+uv run python -m src.data.enrich_teacher --splits train --limit 100 --no-resume
+```
+
 Output folders:
 * **`dataset_00_recipes_baseline_multi_output/`**: organized copy of `recipes_train/dev/test.jsonl`.
 * **`dataset_01_teacher_enriched_multi_output_no_rationale/`**: grouped candidate outputs with

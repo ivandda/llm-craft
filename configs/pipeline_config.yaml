@@ -8,7 +8,7 @@ normalization:
   raw_datasets:
     ericlewis: true
     elementia: true
-    expitau: true
+    expitau: false
     redfast00: true
 
 # Paso 2: Limpieza y Splits (clean.py)
@@ -26,7 +26,7 @@ cleaning:
   require_trusted_vocab_for_untrusted: true
   reject_sample_limit: 500
   quality:
-    max_words: 3
+    max_words: 2
     max_chars: 36
     min_token_chars: 2
     reject_digits: true
@@ -87,3 +87,20 @@ rationale_enrichment:
   max_retries: 2
   temperature: 0.4
   max_rationale_words: 24
+
+# Paso 5 recomendado: enrichment estructurado en una sola llamada.
+# Usa Gemini Flash-Lite para empezar con bajo costo. Acepta registros parciales:
+# nunca fuerza alternativas cuando el teacher no encuentra buenas respuestas.
+structured_enrichment:
+  provider: "google_vertex_ai"
+  model: "gemini-2.5-flash-lite"
+  location: "us-central1"
+  input_dataset_name: "recipes"
+  output_dataset_name: "dataset_03_teacher_structured_enriched"
+  target_num_outputs: 5
+  prompt_version: "teacher_structured_enrichment_v2"
+  max_retries: 2
+  temperature: 0.4
+  max_rationale_words: 24
+  input_price_per_million_tokens: 0.10
+  output_price_per_million_tokens: 0.40

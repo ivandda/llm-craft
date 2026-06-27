@@ -62,6 +62,20 @@ uv run python -m src.data.export_eval
 ### 5. Enriquecimiento con Teacher (manual)
 Genera un dataset derivado agrupado con hasta cinco salidas por receta, sin rationales. Conserva las salidas observadas de `recipes_train/dev/test.jsonl` y usa Gemini 2.5 Flash solo para completar alternativas faltantes.
 
+Camino recomendado actual: enriquecimiento estructurado en una sola llamada con Gemini 2.5 Flash-Lite. El teacher conserva salidas observadas buenas, agrega alternativas solo si son plausibles, ordena candidatos de mejor a peor receta y escribe rationales breves para todas las salidas aceptadas. Los registros parciales son válidos: no se fuerzan respuestas.
+
+Smoke test real mínimo durante desarrollo:
+```bash
+uv run python -m src.data.enrich_teacher --splits train --limit 10 --no-resume
+```
+
+Prueba de costo/calidad:
+```bash
+uv run python -m src.data.enrich_teacher --splits train --limit 100 --no-resume
+```
+
+El script escribe `datasets/enriched/dataset_03_teacher_structured_enriched/manifest.json` con uso de tokens y costo estimado. Las recetas rechazadas van a `rejected.jsonl`.
+
 Smoke test real mínimo:
 ```bash
 uv run python -m src.data.enrich_multi_output --splits train --limit 3
