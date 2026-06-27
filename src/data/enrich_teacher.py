@@ -602,24 +602,10 @@ def build_enriched_record(
     for rank, candidate in enumerate(candidates, start=1):
         candidate["rank"] = rank
 
-    quality_status = "complete" if len(candidates) >= config.target_num_outputs else "partial_enrichment"
     return {
         "input_a": input_a,
         "input_b": input_b,
         "candidate_outputs": candidates[: config.target_num_outputs],
-        "quality_status": quality_status,
-        "metadata": {
-            "source_dataset": config.input_dataset_name,
-            "source_split": split,
-            "teacher_provider": config.provider,
-            "teacher_model": config.model,
-            "enrichment_version": config.prompt_version,
-            "target_num_outputs": config.target_num_outputs,
-            "has_rationales": True,
-            "has_ranked_outputs": True,
-            "partial_outputs_allowed": True,
-            "token_usage": asdict(usage),
-        },
     }
 
 
@@ -785,7 +771,8 @@ def enrich_split(
             if record is not None:
                 target.write(json.dumps(record, ensure_ascii=False) + "\n")
                 counts["written"] += 1
-                counts[record["quality_status"]] += 1
+                quality_status = "complete" if len(record["candidate_outputs"]) >= config.target_num_outputs else "partial_enrichment"
+                counts[quality_status] += 1
             if rejection is not None:
                 rejected.write(json.dumps(rejection, ensure_ascii=False) + "\n")
                 counts["rejected"] += 1
@@ -1079,7 +1066,8 @@ def import_batch_outputs(
                             split_handles[split].write(json.dumps(record, ensure_ascii=False) + "\n")
                             completed_keys_by_split[split].add(recipe_key(recipe))
                             counts["written"] += 1
-                            counts[record["quality_status"]] += 1
+                            quality_status = "complete" if len(record["candidate_outputs"]) >= config.target_num_outputs else "partial_enrichment"
+                            counts[quality_status] += 1
                         if rejection is not None:
                             rejected.write(json.dumps(rejection, ensure_ascii=False) + "\n")
                             counts["rejected"] += 1
