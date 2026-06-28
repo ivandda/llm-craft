@@ -208,6 +208,16 @@ concept_set_uniform -> uniform + logsumexp_prob
 
 Si definís explícitamente `candidate_weighting` y `candidate_aggregation`, esos valores gobiernan la loss efectiva. `loss_type` queda como alias de compatibilidad para completar ambos ejes cuando no se los fija de forma directa.
 
+No se permiten overrides parciales: si definís `candidate_weighting` o `candidate_aggregation`, tenés que definir ambos. Si no definís ninguno, ambos se derivan automáticamente desde `loss_type`.
+
+Si no definís ninguno de los tres campos, se usan los defaults de la config y el entrenamiento queda en la variante `concept_set`, es decir:
+
+```text
+loss_type = concept_set
+candidate_weighting = dataset
+candidate_aggregation = logsumexp_prob
+```
+
 ### Comandos para cada experimento
 
 Usando la configuración base de smoke test, estos comandos permiten correr cada variante de la matriz experimental:

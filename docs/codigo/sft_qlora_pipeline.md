@@ -52,6 +52,10 @@ concept_set_uniform -> uniform + logsumexp_prob
 
 Si se fijan explícitamente `candidate_weighting` y `candidate_aggregation`, esos valores tienen prioridad práctica sobre el alias. `loss_type` queda como ayuda de compatibilidad para completar ambos ejes cuando no se los configura de forma directa.
 
+No se permiten configuraciones parciales: si se define uno de los dos ejes explícitos, se deben definir ambos. Si no se define ninguno, ambos se derivan automáticamente desde `loss_type`.
+
+Si tampoco se define `loss_type`, se usan los defaults de `SFTConfig`, por lo que la configuración efectiva queda en `concept_set`, equivalente a `candidate_weighting="dataset"` y `candidate_aggregation="logsumexp_prob"`.
+
 `ce_target` se conserva únicamente por compatibilidad hacia atrás. Ya no selecciona un único candidato para CE: el collator siempre expande todos los candidatos aceptables de la receta.
 
 `length_normalize_concept_logprob` mantiene una variante experimental donde la log-probabilidad del concepto se divide por su longitud en tokens antes de agregarse por receta. El comportamiento principal sigue siendo la suma autoregresiva completa del concepto.
