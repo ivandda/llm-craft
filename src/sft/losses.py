@@ -58,6 +58,39 @@ def concept_set_loss(
     return concept_set_loss_from_logprobs(concept_logprobs, group_ids, candidate_weights)
 
 
+def soft_ce_loss_from_logprobs(
+    concept_logprobs: torch.Tensor,
+    group_ids: torch.Tensor,
+    candidate_weights: torch.Tensor,
+) -> torch.Tensor:
+    losses = []
+    for group_id in torch.unique(group_ids, sorted=True):
+        group_mask = group_ids == group_id
+        group_logprobs = concept_logprobs[group_mask]
+        group_weights = candidate_weights[group_mask].to(group_logprobs.dtype)
+        group_weights = group_weights / group_weights.sum().clamp_min(torch.finfo(group_weights.dtype).tiny)
+        losses.append(-(group_weights * group_logprobs).sum())
+    return torch.stack(losses).mean()
+
+
+def soft_ce_loss(
+    logits: torch.Tensor,
+    input_ids: torch.Tensor,
+    concept_mask: torch.Tensor,
+    group_ids: torch.Tensor,
+    candidate_weights: torch.Tensor,
+    *,
+    length_normalize: bool = False,
+) -> torch.Tensor:
+    concept_logprobs = causal_concept_logprobs(
+        logits,
+        input_ids,
+        concept_mask,
+        length_normalize=length_normalize,
+    )
+    return soft_ce_loss_from_logprobs(concept_logprobs, group_ids, candidate_weights)
+
+
 def ce_loss(
     logits: torch.Tensor,
     input_ids: torch.Tensor,
@@ -86,6 +119,15 @@ def compute_sft_loss(
 ) -> torch.Tensor:
     if loss_type == "concept_set":
         return concept_set_loss(
+            logits,
+            input_ids,
+            concept_mask,
+            group_ids,
+            candidate_weights,
+            length_normalize=length_normalize,
+        )
+    if loss_type == "soft_ce":
+        return soft_ce_loss(
             logits,
             input_ids,
             concept_mask,

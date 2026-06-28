@@ -120,8 +120,6 @@ def config_from_args(args: argparse.Namespace) -> SFTConfig:
 def validate_config(config: SFTConfig) -> None:
     if config.loss_type not in {"concept_set", "ce", "soft_ce"}:
         raise ValueError("loss_type must be one of: concept_set, ce, soft_ce")
-    if config.loss_type == "soft_ce":
-        raise NotImplementedError("soft_ce is reserved in config but not implemented yet.")
     if config.ce_target not in {"rank1", "observed", "first"}:
         raise ValueError("ce_target must be one of: rank1, observed, first")
     if config.weight_fallback not in {"uniform", "inverse_rank"}:
