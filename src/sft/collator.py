@@ -5,7 +5,7 @@ from typing import Any
 
 import torch
 
-from src.sft.dataset import RecipeExample, select_ce_candidate
+from src.sft.dataset import RecipeExample
 
 
 def render_prefix(input_a: str, input_b: str) -> str:
@@ -45,11 +45,8 @@ class SFTDataCollator:
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
     def _rows_for_example(self, example: RecipeExample, group_id: int) -> list[dict[str, Any]]:
-        candidates = example.candidates
-        if self.loss_type == "ce":
-            candidates = [select_ce_candidate(candidates, self.ce_target)]
         rows = []
-        for candidate in candidates:
+        for candidate in example.candidates:
             text, concept_start, concept_end = render_candidate_text(example.input_a, example.input_b, candidate.output)
             rows.append(
                 {
@@ -63,6 +60,8 @@ class SFTDataCollator:
         return rows
 
     def __call__(self, examples: list[RecipeExample]) -> dict[str, torch.Tensor]:
+        # The dataloader batches recipes. The collator then expands each recipe into
+        # one tokenized row per acceptable candidate while preserving shared group_ids.
         rows: list[dict[str, Any]] = []
         for group_id, example in enumerate(examples):
             rows.extend(self._rows_for_example(example, group_id))

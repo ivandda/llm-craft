@@ -88,7 +88,7 @@ def test_collator_flattens_variable_candidates_by_recipe():
     assert batch["concept_mask"].any(dim=1).all()
 
 
-def test_ce_collator_selects_observed_candidate():
+def test_collator_keeps_all_candidates_for_ce_alias():
     examples = [
         RecipeExample(
             input_a="fire",
@@ -102,5 +102,6 @@ def test_ce_collator_selects_observed_candidate():
 
     batch = SFTDataCollator(DummyFastTokenizer(), loss_type="ce", ce_target="observed")(examples)
 
-    assert batch["input_ids"].shape[0] == 1
-    assert batch["group_ids"].tolist() == [0]
+    assert batch["input_ids"].shape[0] == 2
+    assert batch["group_ids"].tolist() == [0, 0]
+    assert batch["candidate_weights"].tolist() == pytest.approx([0.5, 0.5])

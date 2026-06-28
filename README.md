@@ -124,7 +124,7 @@ uv run python -m src.data.enrich_rationales
 
 ## SFT QLoRA
 
-La pipeline de SFT vive aislada en `src/sft/` y entrena modelos causales autoregresivos sobre datasets JSONL con candidatos múltiples por receta. Soporta LoRA/QLoRA, `concept_set` loss y cross entropy clásica (`ce`) seleccionando un candidato por receta.
+La pipeline de SFT vive aislada en `src/sft/` y entrena modelos causales autoregresivos sobre datasets JSONL con candidatos múltiples por receta. Soporta LoRA/QLoRA y una familia única de losses sobre recetas completas, parametrizada por `candidate_weighting` y `candidate_aggregation`.
 
 La configuración base está en [default.yaml](configs/sft/default.yaml). Actualmente está preparada como smoke test local viable con `sshleifer/tiny-gpt2`, sin 4-bit ni mixed precision, para poder validar el flujo completo incluso sin GPU.
 
@@ -142,7 +142,7 @@ src/sft/
   config.py      # Dataclass SFTConfig, carga YAML + overrides CLI y validación.
   dataset.py     # Lectura JSONL, normalización de candidatos y pesos por receta.
   collator.py    # Construye prompts, concept_mask con offsets y aplana candidatos.
-  losses.py      # concept_set loss y CE sobre tokens del concepto final.
+  losses.py      # Familia unificada de losses sobre los tokens del concepto final.
   trainer.py     # Loop con accelerate, LoRA/QLoRA, eval, checkpoints y adapters.
   train.py       # Entry point: crea run_dir, guarda metadata y lanza train().
   plotting.py    # Genera plots de train/dev loss al final.
@@ -171,7 +171,7 @@ uv run python -m src.sft.train
 
 Ese comando usa pocos ejemplos, `max_steps: 2`, `batch_size: 1`, `gradient_accumulation_steps: 1`, y guarda una corrida en `runs/sft/`.
 
-Para forzar `concept_set`:
+Para usar la variante ponderada tipo concept-set:
 
 ```bash
 uv run python -m src.sft.train \
@@ -179,21 +179,86 @@ uv run python -m src.sft.train \
   --run_name smoke_tiny_concept_set
 ```
 
-Para cross entropy clásica:
+Para cross entropy agrupada por receta:
 
 ```bash
 uv run python -m src.sft.train \
-  --loss_type ce \
-  --ce_target rank1 \
+  --candidate_weighting uniform \
+  --candidate_aggregation expected_logprob \
   --run_name smoke_tiny_ce
 ```
 
-`ce_target` puede ser:
+Los cuatro modos experimentales quedan:
 
 ```text
-rank1     # candidato con menor rank; default recomendado para CE
-observed  # primer candidato con source == observed; si no hay, cae al primero
-first     # primer candidato de la lista JSONL
+candidate_weighting: uniform   + candidate_aggregation: expected_logprob   # CE agrupada por receta
+candidate_weighting: dataset   + candidate_aggregation: expected_logprob   # Soft CE ponderada
+candidate_weighting: uniform   + candidate_aggregation: logsumexp_prob     # Concept-set uniforme
+candidate_weighting: dataset   + candidate_aggregation: logsumexp_prob     # Concept-set ponderada
+```
+
+`loss_type` sigue disponible como alias opcional:
+
+```text
+ce                  -> uniform + expected_logprob
+soft_ce             -> dataset + expected_logprob
+concept_set         -> dataset + logsumexp_prob
+concept_set_uniform -> uniform + logsumexp_prob
+```
+
+Si definís explícitamente `candidate_weighting` y `candidate_aggregation`, esos valores gobiernan la loss efectiva. `loss_type` queda como alias de compatibilidad para completar ambos ejes cuando no se los fija de forma directa.
+
+### Comandos para cada experimento
+
+Usando la configuración base de smoke test, estos comandos permiten correr cada variante de la matriz experimental:
+
+#### 1. CE agrupada por receta
+
+```bash
+uv run python -m src.sft.train \
+  --config configs/sft/default.yaml \
+  --run_name ce_uniform \
+  --candidate_weighting uniform \
+  --candidate_aggregation expected_logprob
+```
+
+#### 2. Soft CE ponderada
+
+```bash
+uv run python -m src.sft.train \
+  --config configs/sft/default.yaml \
+  --run_name soft_ce_weighted \
+  --candidate_weighting dataset \
+  --candidate_aggregation expected_logprob
+```
+
+#### 3. Concept-set uniforme
+
+```bash
+uv run python -m src.sft.train \
+  --config configs/sft/default.yaml \
+  --run_name concept_set_uniform \
+  --candidate_weighting uniform \
+  --candidate_aggregation logsumexp_prob
+```
+
+#### 4. Concept-set ponderada
+
+```bash
+uv run python -m src.sft.train \
+  --config configs/sft/default.yaml \
+  --run_name concept_set_weighted \
+  --candidate_weighting dataset \
+  --candidate_aggregation logsumexp_prob
+```
+
+Los mismos cuatro experimentos también pueden invocarse con aliases legacy de `loss_type`:
+
+```bash
+uv run python -m src.sft.train --config configs/sft/default.yaml --run_name ce_uniform --loss_type ce
+uv run python -m src.sft.train --config configs/sft/default.yaml --run_name soft_ce_weighted --loss_type soft_ce
+uv run python -m src.sft.train --config configs/sft/default.yaml --run_name concept_set_uniform --loss_type concept_set_uniform
+uv run python -m src.sft.train --config configs/sft/default.yaml --run_name concept_set_weighted --loss_type concept_set
 ```
 
 ### Entrenamiento con QLoRA
@@ -236,19 +301,16 @@ Los checkpoints guardan adapter, tokenizer y estado de `accelerate` para recuper
 
 ### Losses implementadas
 
-`concept_set` usa todos los candidatos de una receta. Para cada receta \(x_n\) con candidatos \(c_{n,i}\) y pesos normalizados \(w_{n,i}\):
+Todas las variantes promedian por receta y difieren solo en el esquema de pesos y la agregación. Para cada receta \(x_n\) con candidatos \(c_{n,i}\) y log-probabilidades \(\ell_{n,i} = \log p_\theta(c_{n,i} \mid x_n)\):
 
 ```text
-L_n = -logsumexp_i(log w_{n,i} + log p_theta(c_{n,i} | x_n))
+expected_logprob: L_n = -Sum_i alpha_{n,i} * ell_{n,i}
+logsumexp_prob:   L_n = -log Sum_i alpha_{n,i} * exp(ell_{n,i})
 ```
 
-La log-probabilidad se calcula solo sobre los tokens del concepto final, no sobre el prompt.
+La log-probabilidad se calcula solo sobre los tokens del concepto final, no sobre el prompt. Por default se usa la probabilidad autoregresiva completa del concepto, es decir, la suma de log-probabilidades de sus tokens. Si activás `length_normalize_concept_logprob: true`, pasás a una variante experimental que promedia por longitud del concepto antes de agregar por receta.
 
-`ce` selecciona un único candidato por receta y optimiza:
-
-```text
-L_n = -log p_theta(c_n | x_n)
-```
+El collator siempre preserva todos los candidatos de una receta dentro del mismo batch; `per_device_*_batch_size` cuenta recetas, no candidatos tokenizados.
 
 ### Dataset esperado
 
@@ -258,7 +320,9 @@ El formato principal es JSONL con `candidate_outputs`:
 {"input_a":"fire","input_b":"water","candidate_outputs":[{"output":"steam","source":"observed","rank":1},{"output":"vapor","source":"teacher","rank":2}]}
 ```
 
-Si un candidato trae el campo configurado con `--weight_field weight`, se usa como peso. Si falta, `--weight_fallback inverse_rank` asigna pesos proporcionales a `1/rank` y los normaliza dentro de cada receta; `--weight_fallback uniform` reparte masa uniforme.
+Si un candidato trae el campo configurado con `--weight_field weight`, se usa como peso. Si falta, `--weight_fallback inverse_rank` asigna pesos proporcionales a `1/rank` y los normaliza dentro de cada receta; `--weight_fallback uniform` reparte masa uniforme. Con `merge_duplicate_recipes: true`, filas JSONL repetidas con el mismo `(input_a, input_b)` se fusionan en una sola receta, se deduplican candidatos por `output` sumando su masa y luego se renormaliza dentro de la receta.
+
+`ce_target` se conserva solo por compatibilidad hacia atrás y hoy no altera la selección de candidatos: incluso en la CE agrupada entran todos los candidatos aceptables de la receta.
 
 También se aceptan filas legacy con `outputs` u `output`; `dataset.py` las adapta internamente a candidatos.
 
@@ -296,16 +360,16 @@ ls runs/sft/<run_id>/checkpoints
 
 ### Tests de SFT
 
-Los tests unitarios nuevos cubren carga JSONL, normalización de pesos, máscara por offsets, candidatos variables, `concept_set_loss` diferenciable y smoke train opcional:
+Los tests unitarios nuevos cubren carga JSONL, normalización de pesos, merge por receta, máscara por offsets, candidatos variables y las cuatro variantes de loss, además del smoke train opcional:
 
 ```bash
-PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest tests/sft -q
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run pytest tests/sft -q
 ```
 
 El smoke que descarga un modelo está desactivado por defecto. Para correrlo explícitamente:
 
 ```bash
-RUN_SFT_SMOKE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest tests/sft/test_smoke_train.py -q
+RUN_SFT_SMOKE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run pytest tests/sft/test_smoke_train.py -q
 ```
 
 `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1` evita que pytest cargue plugins globales del sistema que no pertenecen al proyecto.

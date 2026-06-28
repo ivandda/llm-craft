@@ -19,8 +19,10 @@ class SFTConfig:
     dev_path: str = "datasets/final-small-dataset/dev.jsonl"
     output_dir: str = "runs/sft"
     run_name: str | None = None
-    loss_type: str = "concept_set"
-    ce_target: str = "rank1"
+    loss_type: str = "concept_set"  # Optional alias over the two explicit loss axes below.
+    ce_target: str = "rank1"  # Legacy no-op kept for backwards compatibility.
+    candidate_weighting: str = "dataset"
+    candidate_aggregation: str = "logsumexp_prob"
     num_train_epochs: float = 1.0
     max_steps: int = -1
     per_device_train_batch_size: int = 1
@@ -53,6 +55,7 @@ class SFTConfig:
     length_normalize_concept_logprob: bool = False
     weight_field: str = "weight"
     weight_fallback: str = "inverse_rank"
+    merge_duplicate_recipes: bool = True
     trust_remote_code: bool = False
     dataloader_num_workers: int = 0
 
@@ -107,21 +110,45 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def config_from_args(args: argparse.Namespace) -> SFTConfig:
     values = SFTConfig().to_dict()
-    values.update(load_yaml_config(args.config))
+    yaml_values = load_yaml_config(args.config)
+    values.update(yaml_values)
     for field in dataclasses.fields(SFTConfig):
         override = getattr(args, field.name)
         if override is not None:
             values[field.name] = override
+    explicit_weighting = yaml_values.get("candidate_weighting") is not None or args.candidate_weighting is not None
+    explicit_aggregation = yaml_values.get("candidate_aggregation") is not None or args.candidate_aggregation is not None
+    if not explicit_weighting and not explicit_aggregation:
+        alias_weighting, alias_aggregation = resolve_loss_alias(values["loss_type"])
+        values["candidate_weighting"] = alias_weighting
+        values["candidate_aggregation"] = alias_aggregation
     config = SFTConfig(**values)
     validate_config(config)
     return config
 
 
+def resolve_loss_alias(loss_type: str) -> tuple[str, str]:
+    aliases = {
+        "ce": ("uniform", "expected_logprob"),
+        "soft_ce": ("dataset", "expected_logprob"),
+        "concept_set": ("dataset", "logsumexp_prob"),
+        "concept_set_uniform": ("uniform", "logsumexp_prob"),
+    }
+    if loss_type not in aliases:
+        raise ValueError(
+            "loss_type must be one of: concept_set, concept_set_uniform, ce, soft_ce"
+        )
+    return aliases[loss_type]
+
+
 def validate_config(config: SFTConfig) -> None:
-    if config.loss_type not in {"concept_set", "ce", "soft_ce"}:
-        raise ValueError("loss_type must be one of: concept_set, ce, soft_ce")
+    resolve_loss_alias(config.loss_type)
     if config.ce_target not in {"rank1", "observed", "first"}:
         raise ValueError("ce_target must be one of: rank1, observed, first")
+    if config.candidate_weighting not in {"uniform", "dataset"}:
+        raise ValueError("candidate_weighting must be one of: uniform, dataset")
+    if config.candidate_aggregation not in {"expected_logprob", "logsumexp_prob"}:
+        raise ValueError("candidate_aggregation must be one of: expected_logprob, logsumexp_prob")
     if config.weight_fallback not in {"uniform", "inverse_rank"}:
         raise ValueError("weight_fallback must be one of: uniform, inverse_rank")
     if config.gradient_accumulation_steps < 1:

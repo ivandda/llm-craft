@@ -111,25 +111,25 @@ def build_dataloaders(config: SFTConfig, tokenizer: Any) -> tuple[DataLoader, Da
         weight_field=config.weight_field,
         weight_fallback=config.weight_fallback,
         max_examples=config.max_train_examples,
+        merge_duplicate_recipes=config.merge_duplicate_recipes,
     )
     dev_dataset = RecipeSFTDataset(
         config.dev_path,
         weight_field=config.weight_field,
         weight_fallback=config.weight_fallback,
         max_examples=config.max_dev_examples,
+        merge_duplicate_recipes=config.merge_duplicate_recipes,
     )
     train_collator = SFTDataCollator(
         tokenizer=tokenizer,
         max_seq_length=config.max_seq_length,
-        loss_type=config.loss_type,
-        ce_target=config.ce_target,
     )
     eval_collator = SFTDataCollator(
         tokenizer=tokenizer,
         max_seq_length=config.max_seq_length,
-        loss_type=config.loss_type,
-        ce_target=config.ce_target,
     )
+    # `per_device_*_batch_size` counts recipes. Each collated batch can expand to
+    # more tokenized rows because every candidate for a recipe stays in the batch.
     train_loader = DataLoader(
         train_dataset,
         batch_size=config.per_device_train_batch_size,
@@ -150,12 +150,14 @@ def build_dataloaders(config: SFTConfig, tokenizer: Any) -> tuple[DataLoader, Da
 def batch_loss(model: torch.nn.Module, batch: dict[str, torch.Tensor], config: SFTConfig) -> torch.Tensor:
     outputs = model(input_ids=batch["input_ids"], attention_mask=batch["attention_mask"])
     return compute_sft_loss(
-        config.loss_type,
         outputs.logits,
         batch["input_ids"],
         batch["concept_mask"],
         batch["group_ids"],
         batch["candidate_weights"],
+        candidate_weighting=config.candidate_weighting,
+        candidate_aggregation=config.candidate_aggregation,
+        loss_type=config.loss_type,
         length_normalize=config.length_normalize_concept_logprob,
     )
 

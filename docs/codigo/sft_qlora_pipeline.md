@@ -21,17 +21,40 @@ También se aceptan filas legacy con `outputs` u `output`; se convierten interna
 
 ## Pesos
 
-`--weight_field weight` indica el campo de peso esperado por candidato. Si falta, `--weight_fallback inverse_rank` usa pesos proporcionales a `1/rank`; `uniform` asigna el mismo peso a todos. En todos los casos, los pesos se normalizan por receta para que sumen 1.
+`--weight_field weight` indica el campo de peso esperado por candidato. Si falta, `--weight_fallback inverse_rank` usa pesos proporcionales a `1/rank`; `uniform` asigna el mismo peso a todos. En todos los casos, los pesos se normalizan por receta para que sumen 1. Si `merge_duplicate_recipes` está activo, filas con el mismo `(input_a, input_b)` se fusionan, se deduplican candidatos por `output` sumando su masa y luego se renormaliza.
 
 ## Losses
 
-`concept_set` aplana candidatos en el collator, calcula `log p(candidato | input_a, input_b)` solo sobre los tokens del concepto final y agrupa por receta:
+La loss calcula `log p(candidato | input_a, input_b)` solo sobre los tokens del concepto final y siempre agrupa por receta. El collator expande todos los candidatos aceptables dentro del batch; `per_device_*_batch_size` cuenta recetas, no candidatos tokenizados.
+
+Las dos decisiones ortogonales son:
 
 ```text
--logsumexp_i(log w_i + log p(c_i | x))
+candidate_weighting   ∈ {uniform, dataset}
+candidate_aggregation ∈ {expected_logprob, logsumexp_prob}
 ```
 
-`ce` selecciona un único candidato por receta con `--ce_target rank1`, `observed` o `first`, y aplica la CE causal solo sobre los tokens del concepto.
+Con \(\ell_i = \log p_\theta(c_i | x)\) y pesos normalizados \(\alpha_i\):
+
+```text
+expected_logprob: -Sum_i alpha_i * ell_i
+logsumexp_prob:   -log Sum_i alpha_i * exp(ell_i)
+```
+
+Los aliases legacy siguen disponibles:
+
+```text
+ce                  -> uniform + expected_logprob
+soft_ce             -> dataset + expected_logprob
+concept_set         -> dataset + logsumexp_prob
+concept_set_uniform -> uniform + logsumexp_prob
+```
+
+Si se fijan explícitamente `candidate_weighting` y `candidate_aggregation`, esos valores tienen prioridad práctica sobre el alias. `loss_type` queda como ayuda de compatibilidad para completar ambos ejes cuando no se los configura de forma directa.
+
+`ce_target` se conserva únicamente por compatibilidad hacia atrás. Ya no selecciona un único candidato para CE: el collator siempre expande todos los candidatos aceptables de la receta.
+
+`length_normalize_concept_logprob` mantiene una variante experimental donde la log-probabilidad del concepto se divide por su longitud en tokens antes de agregarse por receta. El comportamiento principal sigue siendo la suma autoregresiva completa del concepto.
 
 ## Formato del prompt
 

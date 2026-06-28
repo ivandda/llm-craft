@@ -3,7 +3,14 @@ train_path: datasets/final-small-dataset/train.jsonl
 dev_path: datasets/final-small-dataset/dev.jsonl
 output_dir: runs/sft
 run_name: smoke_tiny_concept_set
-loss_type: ce #concept_set
+# Optional alias:
+# ce                  -> uniform + expected_logprob
+# soft_ce             -> dataset + expected_logprob
+# concept_set         -> dataset + logsumexp_prob
+# concept_set_uniform -> uniform + logsumexp_prob
+loss_type: concept_set
+# Legacy no-op kept for backwards compatibility. CE no longer selects a single
+# candidate; all acceptable candidates remain in the batch.
 ce_target: rank1
 num_train_epochs: 1
 max_steps: 2
@@ -34,8 +41,13 @@ lora_target_modules: auto
 resume_from_checkpoint: null
 max_train_examples: 8
 max_dev_examples: 4
+# Experimental: when true, divide each concept log-probability by its token
+# length before aggregating by recipe. The main formulation keeps this false.
 length_normalize_concept_logprob: false
 weight_field: weight
 weight_fallback: inverse_rank
+# Merge repeated (input_a, input_b) recipes, sum duplicate output mass, then
+# renormalize candidate weights inside the merged recipe.
+merge_duplicate_recipes: true
 trust_remote_code: false
 dataloader_num_workers: 0

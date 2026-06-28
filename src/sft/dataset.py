@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
@@ -65,21 +66,6 @@ def normalize_candidate_weights(
     return [weight / total for weight in weights]
 
 
-def select_ce_candidate(candidates: list[Candidate], strategy: str) -> Candidate:
-    if not candidates:
-        raise ValueError("Cannot select a CE target from an empty candidate list.")
-    if strategy == "rank1":
-        return min(candidates, key=lambda candidate: candidate.rank if candidate.rank is not None else 10**9)
-    if strategy == "observed":
-        for candidate in candidates:
-            if candidate.source == "observed":
-                return candidate
-        return candidates[0]
-    if strategy == "first":
-        return candidates[0]
-    raise ValueError(f"Unsupported CE target strategy: {strategy}")
-
-
 class RecipeSFTDataset:
     def __init__(
         self,
@@ -88,15 +74,18 @@ class RecipeSFTDataset:
         weight_field: str = "weight",
         weight_fallback: str = "inverse_rank",
         max_examples: int | None = None,
+        merge_duplicate_recipes: bool = True,
     ) -> None:
         self.path = Path(path)
         self.weight_field = weight_field
         self.weight_fallback = weight_fallback
+        self.merge_duplicate_recipes = merge_duplicate_recipes
         self.examples = load_recipe_jsonl(
             self.path,
             weight_field=weight_field,
             weight_fallback=weight_fallback,
             max_examples=max_examples,
+            merge_duplicate_recipes=merge_duplicate_recipes,
         )
 
     def __len__(self) -> int:
@@ -116,7 +105,7 @@ def _candidate_rows(record: dict[str, Any]) -> Iterable[dict[str, Any]]:
     raise ValueError("Record must contain `candidate_outputs`, `outputs`, or `output`.")
 
 
-def recipe_from_record(record: dict[str, Any], *, weight_field: str, weight_fallback: str) -> RecipeExample:
+def _raw_recipe_from_record(record: dict[str, Any], *, weight_field: str) -> RecipeExample:
     input_a = record.get("input_a")
     input_b = record.get("input_b")
     if not input_a or not input_b:
@@ -125,8 +114,20 @@ def recipe_from_record(record: dict[str, Any], *, weight_field: str, weight_fall
     candidates = [candidate_from_mapping(row, weight_field) for row in _candidate_rows(record)]
     if not candidates:
         raise ValueError("Each recipe must contain at least one candidate output.")
+    return RecipeExample(input_a=str(input_a), input_b=str(input_b), candidates=candidates)
 
-    normalized = normalize_candidate_weights(candidates, weight_field=weight_field, fallback=weight_fallback)
+
+def _with_normalized_weights(
+    recipe: RecipeExample,
+    *,
+    weight_field: str,
+    weight_fallback: str,
+) -> RecipeExample:
+    normalized = normalize_candidate_weights(
+        recipe.candidates,
+        weight_field=weight_field,
+        fallback=weight_fallback,
+    )
     candidates = [
         Candidate(
             output=candidate.output,
@@ -135,9 +136,57 @@ def recipe_from_record(record: dict[str, Any], *, weight_field: str, weight_fall
             rationale=candidate.rationale,
             weight=weight,
         )
-        for candidate, weight in zip(candidates, normalized, strict=True)
+        for candidate, weight in zip(recipe.candidates, normalized, strict=True)
     ]
-    return RecipeExample(input_a=str(input_a), input_b=str(input_b), candidates=candidates)
+    return RecipeExample(input_a=recipe.input_a, input_b=recipe.input_b, candidates=candidates)
+
+
+def merge_recipe_examples(
+    recipes: list[RecipeExample],
+    *,
+    weight_field: str,
+    weight_fallback: str,
+) -> list[RecipeExample]:
+    merged: OrderedDict[tuple[str, str], list[Candidate]] = OrderedDict()
+    for recipe in recipes:
+        merged.setdefault((recipe.input_a, recipe.input_b), []).extend(recipe.candidates)
+
+    normalized_recipes: list[RecipeExample] = []
+    for (input_a, input_b), candidates in merged.items():
+        # Deduplicate repeated outputs deterministically by preserving the first
+        # candidate metadata and summing the pre-normalized mass contributed by
+        # every duplicate before the final per-recipe renormalization.
+        base_weights = normalize_candidate_weights(
+            candidates,
+            weight_field=weight_field,
+            fallback=weight_fallback,
+        )
+        deduped: OrderedDict[str, Candidate] = OrderedDict()
+        deduped_weights: OrderedDict[str, float] = OrderedDict()
+        for candidate, base_weight in zip(candidates, base_weights, strict=True):
+            if candidate.output not in deduped:
+                deduped[candidate.output] = candidate
+                deduped_weights[candidate.output] = 0.0
+            deduped_weights[candidate.output] += base_weight
+
+        merged_candidates = [
+            Candidate(
+                output=candidate.output,
+                source=candidate.source,
+                rank=candidate.rank,
+                rationale=candidate.rationale,
+                weight=deduped_weights[output],
+            )
+            for output, candidate in deduped.items()
+        ]
+        normalized_recipes.append(
+            _with_normalized_weights(
+                RecipeExample(input_a=input_a, input_b=input_b, candidates=merged_candidates),
+                weight_field=weight_field,
+                weight_fallback=weight_fallback,
+            )
+        )
+    return normalized_recipes
 
 
 def load_recipe_jsonl(
@@ -146,20 +195,35 @@ def load_recipe_jsonl(
     weight_field: str = "weight",
     weight_fallback: str = "inverse_rank",
     max_examples: int | None = None,
+    merge_duplicate_recipes: bool = True,
 ) -> list[RecipeExample]:
     examples: list[RecipeExample] = []
     with Path(path).open("r", encoding="utf-8") as handle:
         for line_number, line in enumerate(handle, start=1):
-            if max_examples is not None and len(examples) >= max_examples:
+            if not merge_duplicate_recipes and max_examples is not None and len(examples) >= max_examples:
                 break
             stripped = line.strip()
             if not stripped:
                 continue
             try:
                 record = json.loads(stripped)
-                examples.append(
-                    recipe_from_record(record, weight_field=weight_field, weight_fallback=weight_fallback)
-                )
+                examples.append(_raw_recipe_from_record(record, weight_field=weight_field))
             except Exception as exc:
                 raise ValueError(f"Invalid recipe record at {path}:{line_number}: {exc}") from exc
-    return examples
+    if merge_duplicate_recipes:
+        examples = merge_recipe_examples(
+            examples,
+            weight_field=weight_field,
+            weight_fallback=weight_fallback,
+        )
+        if max_examples is not None:
+            examples = examples[:max_examples]
+        return examples
+    return [
+        _with_normalized_weights(
+            recipe,
+            weight_field=weight_field,
+            weight_fallback=weight_fallback,
+        )
+        for recipe in examples
+    ]

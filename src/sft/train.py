@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from src.sft.config import config_from_args, parse_args
+from src.sft.config import config_from_args, parse_args, resolve_loss_alias
 from src.sft.trainer import train
 from src.sft.utils import (
     file_fingerprint,
@@ -19,7 +19,11 @@ def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
     config = config_from_args(args)
     set_reproducible_seed(config.seed)
-    run_id = timestamp_run_id(config.model_name_or_path, config.loss_type, config.run_name)
+    alias_axes = resolve_loss_alias(config.loss_type)
+    effective_loss_name = config.loss_type
+    if (config.candidate_weighting, config.candidate_aggregation) != alias_axes:
+        effective_loss_name = f"{config.candidate_weighting}_{config.candidate_aggregation}"
+    run_id = timestamp_run_id(config.model_name_or_path, effective_loss_name, config.run_name)
     run_dir = make_run_dir(config.output_dir, run_id)
 
     write_yaml(run_dir / "config.yaml", config.to_dict())
