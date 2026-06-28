@@ -386,6 +386,29 @@ RUN_SFT_SMOKE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run pytest tests/sft/test_sm
 
 ---
 
+## SFT en Vertex AI (Google Cloud)
+
+El mismo `src/sft/train.py` corre como **Custom Training Job** en Vertex AI sin modificaciones: Vertex monta el bucket de GCS en `/gcs/<bucket>/`, así que los datos entran desde `datasets/` y la corrida (adapters, checkpoints, métricas y plots) sale a `runs/`.
+
+```bash
+# 1. Subir datos al bucket (si no están ya)
+gsutil -m cp datasets/final-10k/train.jsonl datasets/final-10k/dev.jsonl \
+  gs://llm-craft-bucket/datasets/final-10k/
+
+# 2. Buildear + pushear la imagen a Artifact Registry (Cloud Build)
+gcloud builds submit --config cloudbuild.yaml --project nlp2026-498021
+
+# 3. Lanzar el entrenamiento (1x NVIDIA L4)
+uv run --group vertex python -m src.sft.vertex_submit \
+  --run-name qwen05b-10k --config configs/sft/qwen05b_10k_example.yaml
+```
+
+`train.py` es config-driven: la imagen lleva los YAML de `configs/sft/` horneados y `vertex_submit.py` sobrescribe las rutas para que apunten al mount `/gcs/`. La dependencia `google-cloud-aiplatform` vive en el grupo opt-in `vertex`, por lo que el entrenamiento local y la imagen no la instalan.
+
+La guía completa (prerrequisitos, permisos, cuota de GPU, overrides y descarga de adapters) está en [vertex_training.md](docs/codigo/vertex_training.md).
+
+---
+
 ## Frontend
 
 La interfaz jugable vive en `apps/web` como una app Next.js preparada para conectar modelos más adelante mediante contratos mock tipados. Incluye registro/login mock en memoria con credenciales seeded `admin/admin`, menu de modos (`Sandbox` y `Goal`), perfil con logros destacados y leaderboard mock para objetivos completados.
@@ -415,6 +438,7 @@ Para más detalles teóricos y de diseño, consulte:
 * [data_pipeline.md](docs/codigo/data_pipeline.md): Especificaciones técnicas de la limpieza, hashes y formato SFT.
 * [data_normalization.md](docs/codigo/data_normalization.md): Proceso de extracción inicial de datasets crudos.
 * [sft_qlora_pipeline.md](docs/codigo/sft_qlora_pipeline.md): Diseño e implementación de la pipeline SFT con LoRA/QLoRA, losses y outputs.
+* [vertex_training.md](docs/codigo/vertex_training.md): Entrenar `src/sft/train.py` en Vertex AI con imagen propia en Artifact Registry y datos en GCS.
 * [frontend_next_app.md](docs/codigo/frontend_next_app.md): Guía para ejecutar, validar y extender la app Next.js jugable.
 * [destilacion_creatividad_composicional.md](docs/informe/destilacion_creatividad_composicional.md): Paper de diseño del proyecto de investigación.
 

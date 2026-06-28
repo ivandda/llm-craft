@@ -25,6 +25,11 @@ dependencies = [
 dev = [
     "pytest>=9.0.2",
 ]
+# Opt-in group: only needed locally to submit Vertex jobs (src/sft/vertex_submit.py).
+# Not installed by default, so local training stays lean. Use: uv sync --group vertex
+vertex = [
+    "google-cloud-aiplatform>=1.71.0",
+]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

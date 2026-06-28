@@ -1,0 +1,22 @@
+# Build context exclusions for the Vertex AI training image.
+# Keep the image small: only ship source + project metadata.
+.venv/
+.git/
+.pytest_cache/
+__pycache__/
+*.pyc
+
+# Data and outputs live in GCS, not in the image.
+datasets/
+checkpoints/
+runs/
+artifacts/
+
+# Frontend is unrelated to training.
+apps/
+node_modules/
+
+# Local-only files.
+.env
+secrets/
+docs/
