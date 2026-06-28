@@ -65,7 +65,7 @@ gsutil iam ch \
 
 ## Flujo de entrenamiento
 
-### 1. Subir los datos al bucket
+### 1. Subir los datos al bucket (si no están ya subidos)
 
 ```bash
 gsutil -m cp datasets/final-10k/train.jsonl datasets/final-10k/dev.jsonl \
@@ -74,15 +74,10 @@ gsutil -m cp datasets/final-10k/train.jsonl datasets/final-10k/dev.jsonl \
 
 ### 2. Buildear y pushear la imagen (Cloud Build)
 
+En caso de ser necesario (cambios en `src/`, `configs/`, o dependencias en `pyproject.toml`/`uv.lock`).
+
 ```bash
 gcloud builds submit --config cloudbuild.yaml --project nlp2026-498021
-```
-
-Para imagenes inmutables por commit:
-
-```bash
-gcloud builds submit --config cloudbuild.yaml --project nlp2026-498021 \
-  --substitutions _TAG=$(git rev-parse --short HEAD)
 ```
 
 ### 3. Lanzar el entrenamiento
@@ -132,7 +127,7 @@ Dentro de cada run: `best_adapter/`, `final_adapter/`, `checkpoints/`,
 ## Entrenamiento local vs Vertex
 
 El mismo `src/sft/train.py` corre en ambos lados. Local no necesita el grupo
-`vertex`:
+de dependencias `vertex`:
 
 ```bash
 uv run python -m src.sft.train \
