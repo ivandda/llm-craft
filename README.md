@@ -122,97 +122,267 @@ uv run python -m src.data.enrich_rationales
 
 ---
 
-## SFT y Google Colab
+## SFT QLoRA
 
-### Preparar muestras para entrenamiento
+La pipeline de SFT vive aislada en `src/sft/` y entrena modelos causales autoregresivos sobre datasets JSONL con candidatos múltiples por receta. Soporta LoRA/QLoRA y una familia única de losses sobre recetas completas, parametrizada por `candidate_weighting` y `candidate_aggregation`.
 
-```bash
-uv run python -m src.sft.prepare_train_eval_data \
-  --train-input datasets/processed/recipes_train.jsonl \
-  --eval-input datasets/processed/recipes_dev.jsonl \
-  --train-output artifacts/data/recipes_train_sample_8000.jsonl \
-  --eval-output artifacts/data/recipes_dev_sample_2000.jsonl \
-  --train-sample-size 8000 \
-  --eval-sample-size 2000 \
-  --seed 42
-```
+La configuración base está en [default.yaml](configs/sft/default.yaml). Actualmente está preparada como smoke test local viable con `sshleifer/tiny-gpt2`, sin 4-bit ni mixed precision, para poder validar el flujo completo incluso sin GPU.
 
-### Crear zip para Colab
-
-El zip incluye `datasets/processed/eval_dev_all.jsonl` para evaluacion batch.
-Si todavia no existe, generarlo con:
+Instalar dependencias:
 
 ```bash
-uv run python -m src.data.run_pipeline
-uv run python -m src.data.export_eval
+uv sync
 ```
+
+### Estructura de archivos
+
+```text
+src/sft/
+  __init__.py
+  config.py      # Dataclass SFTConfig, carga YAML + overrides CLI y validación.
+  dataset.py     # Lectura JSONL, normalización de candidatos y pesos por receta.
+  collator.py    # Construye prompts, concept_mask con offsets y aplana candidatos.
+  losses.py      # Familia unificada de losses sobre los tokens del concepto final.
+  trainer.py     # Loop con accelerate, LoRA/QLoRA, eval, checkpoints y adapters.
+  train.py       # Entry point: crea run_dir, guarda metadata y lanza train().
+  plotting.py    # Genera plots de train/dev loss al final.
+  utils.py       # Seeds, fingerprints, git info, JSON/YAML y manejo de checkpoints.
+
+configs/sft/
+  default.yaml   # Defaults del smoke local y parámetros editables.
+
+tests/sft/
+  test_config.py
+  test_dataset.py
+  test_collator.py
+  test_losses.py
+  test_smoke_train.py
+```
+
+La guía técnica extendida está en [sft_qlora_pipeline.md](docs/codigo/sft_qlora_pipeline.md).
+
+### Smoke test local
+
+Con el `default.yaml` actual alcanza con:
 
 ```bash
-uv run python -m src.sft.create_colab_zip \
-  --train-file artifacts/data/recipes_train_sample_8000.jsonl \
-  --eval-file artifacts/data/recipes_dev_sample_2000.jsonl \
-  --output-path artifacts/colab/llm-craft-sft-colab.zip
+uv run python -m src.sft.train
 ```
 
-En Colab, subir el zip y descomprimirlo:
+Ese comando usa pocos ejemplos, `max_steps: 2`, `batch_size: 1`, `gradient_accumulation_steps: 1`, y guarda una corrida en `runs/sft/`.
 
-```bash
-!unzip -q llm-craft-sft-colab.zip -d /content
-%cd /content/llm-craft-colab
-!pip install -q uv
-!uv sync
-```
-
-### Entrenar
+Para usar la variante ponderada tipo concept-set:
 
 ```bash
 uv run python -m src.sft.train \
-  --train-file artifacts/data/recipes_train_sample_8000.jsonl \
-  --eval-file artifacts/data/recipes_dev_sample_2000.jsonl \
-  --output-dir artifacts/sft/smollm2-clean-lora \
-  --model-name HuggingFaceTB/SmolLM2-135M-Instruct \
-  --lora-mode lora \
-  --max-steps 100
+  --loss_type concept_set \
+  --run_name smoke_tiny_concept_set
 ```
 
-### Inferencia
+Para cross entropy agrupada por receta:
 
 ```bash
-uv run python -m src.sft.predict \
-  --adapter-dir artifacts/sft/smollm2-clean-lora \
-  --input-a fire \
-  --input-b water
+uv run python -m src.sft.train \
+  --candidate_weighting uniform \
+  --candidate_aggregation expected_logprob \
+  --run_name smoke_tiny_ce
 ```
 
-### Evaluación batch
+Los cuatro modos experimentales quedan:
 
-Durante el desarrollo, usar `eval_dev_all.jsonl` para comparar variantes sin tocar el test final.
-Si falta ese archivo, correr primero `uv run python -m src.data.export_eval`.
+```text
+candidate_weighting: uniform   + candidate_aggregation: expected_logprob   # CE agrupada por receta
+candidate_weighting: dataset   + candidate_aggregation: expected_logprob   # Soft CE ponderada
+candidate_weighting: uniform   + candidate_aggregation: logsumexp_prob     # Concept-set uniforme
+candidate_weighting: dataset   + candidate_aggregation: logsumexp_prob     # Concept-set ponderada
+```
 
-Evaluar el modelo base contra respuestas conocidas de dev:
+`loss_type` sigue disponible como alias opcional:
+
+```text
+ce                  -> uniform + expected_logprob
+soft_ce             -> dataset + expected_logprob
+concept_set         -> dataset + logsumexp_prob
+concept_set_uniform -> uniform + logsumexp_prob
+```
+
+Si definís explícitamente `candidate_weighting` y `candidate_aggregation`, esos valores gobiernan la loss efectiva. `loss_type` queda como alias de compatibilidad para completar ambos ejes cuando no se los fija de forma directa.
+
+No se permiten overrides parciales: si definís `candidate_weighting` o `candidate_aggregation`, tenés que definir ambos. Si no definís ninguno, ambos se derivan automáticamente desde `loss_type`.
+
+Si no definís ninguno de los tres campos, se usan los defaults de la config y el entrenamiento queda en la variante `concept_set`, es decir:
+
+```text
+loss_type = concept_set
+candidate_weighting = dataset
+candidate_aggregation = logsumexp_prob
+```
+
+### Comandos para cada experimento
+
+Usando la configuración base de smoke test, estos comandos permiten correr cada variante de la matriz experimental:
+
+#### 1. CE agrupada por receta
 
 ```bash
-uv run python -m src.eval.run_sft_eval \
-  --eval-file datasets/processed/eval_dev_all.jsonl \
-  --output-file artifacts/eval/smollm2-base-dev.jsonl \
-  --model-name HuggingFaceTB/SmolLM2-135M-Instruct
+uv run python -m src.sft.train \
+  --config configs/sft/default.yaml \
+  --run_name ce_uniform \
+  --candidate_weighting uniform \
+  --candidate_aggregation expected_logprob
 ```
 
-Evaluar un adapter LoRA entrenado en dev:
+#### 2. Soft CE ponderada
 
 ```bash
-uv run python -m src.eval.run_sft_eval \
-  --eval-file datasets/processed/eval_dev_all.jsonl \
-  --output-file artifacts/eval/smollm2-clean-lora-dev.jsonl \
-  --adapter-dir artifacts/sft/smollm2-clean-lora
+uv run python -m src.sft.train \
+  --config configs/sft/default.yaml \
+  --run_name soft_ce_weighted \
+  --candidate_weighting dataset \
+  --candidate_aggregation expected_logprob
 ```
 
-El comando genera un JSONL con predicciones por ejemplo e imprime métricas agregadas:
-`canonical_accuracy`, `known_output_accuracy` y `empty_predictions`.
+#### 3. Concept-set uniforme
 
-Reservar `eval_test_all.jsonl` para la evaluación final.
+```bash
+uv run python -m src.sft.train \
+  --config configs/sft/default.yaml \
+  --run_name concept_set_uniform \
+  --candidate_weighting uniform \
+  --candidate_aggregation logsumexp_prob
+```
 
-La guía completa está en [sft_training_colab.md](docs/codigo/sft_training_colab.md).
+#### 4. Concept-set ponderada
+
+```bash
+uv run python -m src.sft.train \
+  --config configs/sft/default.yaml \
+  --run_name concept_set_weighted \
+  --candidate_weighting dataset \
+  --candidate_aggregation logsumexp_prob
+```
+
+Los mismos cuatro experimentos también pueden invocarse con aliases legacy de `loss_type`:
+
+```bash
+uv run python -m src.sft.train --config configs/sft/default.yaml --run_name ce_uniform --loss_type ce
+uv run python -m src.sft.train --config configs/sft/default.yaml --run_name soft_ce_weighted --loss_type soft_ce
+uv run python -m src.sft.train --config configs/sft/default.yaml --run_name concept_set_uniform --loss_type concept_set_uniform
+uv run python -m src.sft.train --config configs/sft/default.yaml --run_name concept_set_weighted --loss_type concept_set
+```
+
+### Entrenamiento con QLoRA
+
+Para una corrida real con Qwen 4B hace falta una máquina con CUDA. En CPU la carga y el backward de un modelo 4B son extremadamente lentos.
+
+```bash
+uv run python -m src.sft.train \
+  --model_name_or_path Qwen/Qwen3-4B-Instruct-2507 \
+  --train_path datasets/final-small-dataset/train.jsonl \
+  --dev_path datasets/final-small-dataset/dev.jsonl \
+  --output_dir runs/sft \
+  --run_name qwen4b_concept_set \
+  --loss_type concept_set \
+  --load_in_4bit true \
+  --bf16 true \
+  --fp16 false \
+  --gradient_checkpointing true \
+  --max_train_examples 32 \
+  --max_dev_examples 16 \
+  --max_steps 10 \
+  --per_device_train_batch_size 1 \
+  --gradient_accumulation_steps 2 \
+  --eval_steps 5 \
+  --save_steps 5 \
+  --logging_steps 1
+```
+
+### Reanudar desde checkpoint
+
+```bash
+uv run python -m src.sft.train \
+  --config configs/sft/default.yaml \
+  --resume_from_checkpoint runs/sft/<run_id>/checkpoints/checkpoint-000002 \
+  --max_steps 4 \
+  --run_name smoke_resume
+```
+
+Los checkpoints guardan adapter, tokenizer y estado de `accelerate` para recuperar optimizer, scheduler y RNG.
+
+### Losses implementadas
+
+Todas las variantes promedian por receta y difieren solo en el esquema de pesos y la agregación. Para cada receta \(x_n\) con candidatos \(c_{n,i}\) y log-probabilidades \(\ell_{n,i} = \log p_\theta(c_{n,i} \mid x_n)\):
+
+```text
+expected_logprob: L_n = -Sum_i alpha_{n,i} * ell_{n,i}
+logsumexp_prob:   L_n = -log Sum_i alpha_{n,i} * exp(ell_{n,i})
+```
+
+La log-probabilidad se calcula solo sobre los tokens del concepto final, no sobre el prompt. Por default se usa la probabilidad autoregresiva completa del concepto, es decir, la suma de log-probabilidades de sus tokens. Si activás `length_normalize_concept_logprob: true`, pasás a una variante experimental que promedia por longitud del concepto antes de agregar por receta.
+
+El collator siempre preserva todos los candidatos de una receta dentro del mismo batch; `per_device_*_batch_size` cuenta recetas, no candidatos tokenizados.
+
+### Dataset esperado
+
+El formato principal es JSONL con `candidate_outputs`:
+
+```json
+{"input_a":"fire","input_b":"water","candidate_outputs":[{"output":"steam","source":"observed","rank":1},{"output":"vapor","source":"teacher","rank":2}]}
+```
+
+Si un candidato trae el campo configurado con `--weight_field weight`, se usa como peso. Si falta, `--weight_fallback inverse_rank` asigna pesos proporcionales a `1/rank` y los normaliza dentro de cada receta; `--weight_fallback uniform` reparte masa uniforme. Con `merge_duplicate_recipes: true`, filas JSONL repetidas con el mismo `(input_a, input_b)` se fusionan en una sola receta, se deduplican candidatos por `output` sumando su masa y luego se renormaliza dentro de la receta.
+
+`ce_target` se conserva solo por compatibilidad hacia atrás y hoy no altera la selección de candidatos: incluso en la CE agrupada entran todos los candidatos aceptables de la receta.
+
+También se aceptan filas legacy con `outputs` u `output`; `dataset.py` las adapta internamente a candidatos.
+
+### Outputs de una corrida
+
+Cada corrida se guarda en `runs/sft/<timestamp>_<run_name_o_model_loss>/`:
+
+```text
+config.yaml
+command.txt
+git_info.json
+data_fingerprint.json
+metrics.jsonl
+train_losses.jsonl
+eval_losses.jsonl
+plots/
+  train_loss.png
+  dev_loss.png
+  losses_combined.png
+checkpoints/
+  checkpoint-000002/
+best_adapter/
+final_adapter/
+tokenizer/
+trainer_state.json
+```
+
+Para revisar rápido una corrida:
+
+```bash
+cat runs/sft/<run_id>/metrics.jsonl
+cat runs/sft/<run_id>/trainer_state.json
+ls runs/sft/<run_id>/checkpoints
+```
+
+### Tests de SFT
+
+Los tests unitarios nuevos cubren carga JSONL, normalización de pesos, merge por receta, máscara por offsets, candidatos variables y las cuatro variantes de loss, además del smoke train opcional:
+
+```bash
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run pytest tests/sft -q
+```
+
+El smoke que descarga un modelo está desactivado por defecto. Para correrlo explícitamente:
+
+```bash
+RUN_SFT_SMOKE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run pytest tests/sft/test_smoke_train.py -q
+```
+
+`PYTEST_DISABLE_PLUGIN_AUTOLOAD=1` evita que pytest cargue plugins globales del sistema que no pertenecen al proyecto.
 
 ---
 
@@ -244,7 +414,7 @@ Para más detalles teóricos y de diseño, consulte:
 * [adr_data_pipeline.md](docs/codigo/adr_data_pipeline.md): Architecture Decision Record (ADR) con las decisiones del pipeline.
 * [data_pipeline.md](docs/codigo/data_pipeline.md): Especificaciones técnicas de la limpieza, hashes y formato SFT.
 * [data_normalization.md](docs/codigo/data_normalization.md): Proceso de extracción inicial de datasets crudos.
-* [sft_training_colab.md](docs/codigo/sft_training_colab.md): Comandos para preparar muestras SFT, empaquetar Colab, entrenar y predecir.
+* [sft_qlora_pipeline.md](docs/codigo/sft_qlora_pipeline.md): Diseño e implementación de la pipeline SFT con LoRA/QLoRA, losses y outputs.
 * [frontend_next_app.md](docs/codigo/frontend_next_app.md): Guía para ejecutar, validar y extender la app Next.js jugable.
 * [destilacion_creatividad_composicional.md](docs/informe/destilacion_creatividad_composicional.md): Paper de diseño del proyecto de investigación.
 
