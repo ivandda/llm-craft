@@ -20,14 +20,16 @@ COPY --from=ghcr.io/astral-sh/uv:0.11.21 /uv /usr/local/bin/uv
 WORKDIR /app
 
 # Install dependencies first (cached layer) using only the lock + manifest.
+# --no-default-groups drops dev + agents (langchain/google-genai stack), which the
+# SFT training entrypoint never imports, keeping the image small and the pull fast.
 COPY pyproject.toml uv.lock .python-version ./
-RUN uv sync --frozen --no-dev --no-install-project
+RUN uv sync --frozen --no-default-groups --no-install-project
 
 # Then add the source and finish installing the project itself.
 COPY src ./src
 COPY configs ./configs
 COPY README.md ./README.md
-RUN uv sync --frozen --no-dev
+RUN uv sync --frozen --no-default-groups
 
 ENV PATH="/opt/venv/bin:${PATH}"
 
