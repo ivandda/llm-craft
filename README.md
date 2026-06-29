@@ -15,6 +15,27 @@ uv sync
 
 ---
 
+## Base de datos local
+
+La app web y el dataset curado `final-10k` usan Postgres local con Docker. Los
+datos persisten en `var/postgres-data/`, fuera de git.
+
+```bash
+docker compose up -d postgres
+uv run python -m src.data.db_migrate
+uv run python -m src.data.import_final10k_to_postgres --replace-dataset final-10k
+```
+
+La URL por defecto es:
+
+```text
+postgres://llm_craft:llm_craft_dev@localhost:5432/llm_craft
+```
+
+La guía completa está en [postgres_dataset_db.md](docs/codigo/postgres_dataset_db.md).
+
+---
+
 ## Ejecución del Pipeline completo
 
 Puedes ejecutar todo el pipeline de procesamiento de datos secuencialmente usando el script maestro:

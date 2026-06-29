@@ -12,7 +12,7 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: "Invalid profile payload" }, { status: 400 });
   }
 
-  const result = updateProfile(readCookie(request, SESSION_COOKIE_NAME), payload);
+  const result = await updateProfile(readCookie(request, SESSION_COOKIE_NAME), payload);
 
   if ("error" in result) {
     return NextResponse.json({ error: result.error }, { status: result.status });

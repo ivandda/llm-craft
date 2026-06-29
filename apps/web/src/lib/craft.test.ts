@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   BASE_ELEMENTS,
   combineElements,
@@ -19,7 +19,137 @@ import {
   saveLeaderboardEntry
 } from "@/lib/server/mockLeaderboard";
 
+const dbMock = vi.hoisted(() => {
+  type UserRow = {
+    id: string;
+    username: string;
+    display_name: string;
+    password_hash: string;
+    password_salt: string;
+  };
+  type LeaderboardRow = {
+    id: string;
+    goal_id: string;
+    goal_title: string;
+    user_id: string;
+    username: string;
+    display_name: string;
+    combinations_used: number;
+    completed_at: Date;
+  };
+
+  const users = new Map<string, UserRow>();
+  const sessions = new Map<string, string>();
+  const leaderboard = new Map<string, LeaderboardRow>();
+
+  async function query(sql: string, params: unknown[] = []) {
+    const normalizedSql = sql.toLowerCase().replace(/\s+/g, " ");
+
+    if (normalizedSql.includes("insert into users")) {
+      const [id, username, displayName, passwordHash, passwordSalt] = params as string[];
+      if (![...users.values()].some((user) => user.username === username)) {
+        users.set(id, {
+          id,
+          username,
+          display_name: displayName,
+          password_hash: passwordHash,
+          password_salt: passwordSalt
+        });
+      }
+      return { rows: [] };
+    }
+
+    if (normalizedSql.includes("insert into user_profiles")) {
+      return { rows: [] };
+    }
+
+    if (
+      normalizedSql.includes("from users") &&
+      normalizedSql.includes("where username")
+    ) {
+      const username = params[0] as string;
+      return {
+        rows: [...users.values()].filter((user) => user.username === username)
+      };
+    }
+
+    if (normalizedSql.includes("insert into sessions")) {
+      const [sessionId, userId] = params as string[];
+      sessions.set(sessionId, userId);
+      return { rows: [] };
+    }
+
+    if (normalizedSql.includes("insert into leaderboard_entries")) {
+      const [
+        id,
+        goalId,
+        goalTitle,
+        userId,
+        username,
+        displayName,
+        combinationsUsed
+      ] = params as [string, string, string, string, string, string, number];
+      const key = `${goalId}:${userId}`;
+      const currentEntry = leaderboard.get(key);
+
+      if (currentEntry && currentEntry.combinations_used <= combinationsUsed) {
+        return { rows: [] };
+      }
+
+      const entry = {
+        id,
+        goal_id: goalId,
+        goal_title: goalTitle,
+        user_id: userId,
+        username,
+        display_name: displayName,
+        combinations_used: combinationsUsed,
+        completed_at: new Date("2026-06-29T00:00:00.000Z")
+      };
+      leaderboard.set(key, entry);
+      return { rows: [entry] };
+    }
+
+    if (
+      normalizedSql.includes("from leaderboard_entries") &&
+      normalizedSql.includes("and user_id")
+    ) {
+      return { rows: [leaderboard.get(`${params[0]}:${params[1]}`)] };
+    }
+
+    if (normalizedSql.includes("from leaderboard_entries")) {
+      const goalId = params[0] as string;
+      return {
+        rows: [...leaderboard.values()]
+          .filter((entry) => entry.goal_id === goalId)
+          .sort((left, right) => left.combinations_used - right.combinations_used)
+      };
+    }
+
+    return { rows: [] };
+  }
+
+  return {
+    query: vi.fn(query),
+    reset() {
+      users.clear();
+      sessions.clear();
+      leaderboard.clear();
+    },
+    transaction: vi.fn(async (callback) => callback({ query }))
+  };
+});
+
+vi.mock("@/lib/server/db", () => ({
+  query: dbMock.query,
+  transaction: dbMock.transaction
+}));
+
 describe("craft utilities", () => {
+  beforeEach(() => {
+    dbMock.reset();
+  });
+
   it("normalizes concept names", () => {
     expect(normalizeConcept("  Hot   Spring  ")).toBe("hot spring");
   });
@@ -100,8 +230,8 @@ describe("craft utilities", () => {
 
   it("defines the static goal preset inventory and objective", () => {
     expect(GOAL_PRESET.mode).toBe("goal");
-    expect(GOAL_PRESET.target.id).toBe("plant");
-    expect(GOAL_PRESET.objective).toContain("plant");
+    expect(GOAL_PRESET.target.id).toBe("grass");
+    expect(GOAL_PRESET.objective).toContain("grass");
     expect(getInitialInventoryForMode("goal").map((element) => element.id)).toEqual([
       "earth",
       "rain"
@@ -109,8 +239,8 @@ describe("craft utilities", () => {
     expect(getInitialInventoryForMode("sandbox")).toEqual(BASE_ELEMENTS);
   });
 
-  it("seeds admin credentials for mock auth", () => {
-    const result = loginUser({
+  it("seeds admin credentials for database auth", async () => {
+    const result = await loginUser({
       username: "admin",
       password: "admin"
     });
@@ -118,26 +248,26 @@ describe("craft utilities", () => {
     expect("user" in result ? result.user.username : null).toBe("admin");
   });
 
-  it("keeps the best leaderboard score per user", () => {
+  it("keeps the best leaderboard score per user", async () => {
     const user = {
       id: "leaderboard-test-user",
       username: "runner",
       displayName: "Runner"
     };
 
-    saveLeaderboardEntry({
+    await saveLeaderboardEntry({
       user,
       goalId: "test-goal",
       goalTitle: "Test Goal",
       combinationsUsed: 5
     });
-    saveLeaderboardEntry({
+    await saveLeaderboardEntry({
       user,
       goalId: "test-goal",
       goalTitle: "Test Goal",
       combinationsUsed: 2
     });
-    saveLeaderboardEntry({
+    await saveLeaderboardEntry({
       user: {
         id: "leaderboard-test-other",
         username: "other",
@@ -149,7 +279,7 @@ describe("craft utilities", () => {
     });
 
     expect(
-      listLeaderboard("test-goal").map((entry) => [
+      (await listLeaderboard("test-goal")).map((entry) => [
         entry.displayName,
         entry.combinationsUsed
       ])

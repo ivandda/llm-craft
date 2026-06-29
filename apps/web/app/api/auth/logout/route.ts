@@ -9,7 +9,7 @@ export async function POST(request: Request) {
     .find((cookie) => cookie.startsWith(`${SESSION_COOKIE_NAME}=`))
     ?.split("=")[1];
 
-  clearSession(sessionId);
+  await clearSession(sessionId);
 
   const response = NextResponse.json({ ok: true });
   response.cookies.set(SESSION_COOKIE_NAME, "", {

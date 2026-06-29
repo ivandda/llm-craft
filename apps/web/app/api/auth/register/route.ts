@@ -15,7 +15,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const result = registerUser({
+  const result = await registerUser({
     username: payload.username,
     password: payload.password,
     displayName: payload.displayName

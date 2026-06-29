@@ -1,4 +1,4 @@
-import { combineElements } from "@/lib/craft";
+import { combineElementsWithDataset } from "@/lib/server/dbRecipes";
 import type { CombineRequest } from "@/lib/types";
 import { NextResponse } from "next/server";
 
@@ -12,7 +12,7 @@ export async function POST(request: Request) {
     );
   }
 
-  return NextResponse.json(combineElements(payload));
+  return NextResponse.json(await combineElementsWithDataset(payload));
 }
 
 function isCombineRequest(value: CombineRequest | null): value is CombineRequest {

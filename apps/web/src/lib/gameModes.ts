@@ -11,8 +11,8 @@ export const GOAL_PRESET: GoalPreset = {
   mode: "goal",
   title: "First Garden",
   description: "A static mock goal ready for future backend validation.",
-  objective: "Discover plant from earth and rain.",
-  target: createElementToken("plant", "🌱"),
+  objective: "Discover grass from earth and rain.",
+  target: createElementToken("grass", "🌱"),
   metadata: {
     difficulty: "intro",
     status: "mock"

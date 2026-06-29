@@ -204,6 +204,7 @@ cython_debug/
 node_modules/
 .next/
 out/
+output/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*

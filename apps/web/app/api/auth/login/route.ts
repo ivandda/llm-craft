@@ -14,7 +14,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const result = loginUser({
+  const result = await loginUser({
     username: payload.username,
     password: payload.password
   });
