@@ -297,6 +297,35 @@ uv run python -m src.sft.train \
   --logging_steps 1
 ```
 
+Para probar Qwen3 4B con `thinking mode` y el chat template del tokenizer:
+
+```bash
+uv run python -m src.sft.train \
+  --config configs/sft/qwen3_4b_thinking_10k_example.yaml \
+  --max_train_examples 32 \
+  --max_dev_examples 16 \
+  --max_steps 10 \
+  --run_name qwen3_4b_thinking_smoke
+```
+
+La config `qwen3_4b_thinking_10k_example.yaml` usa `Qwen/Qwen3-4B-Thinking-2507`, activa `prompt_format: qwen_chat` y mantiene la supervisión solo sobre el concepto final del mensaje `assistant`.
+
+Con `prompt_format: qwen_chat`, el contenido lógico del prompt queda así:
+
+```text
+system: You combine two concepts into one resulting concept.
+user:
+Given two concepts, combine them into one resulting concept.
+
+Concept A: fire
+Concept B: water
+
+Return only the resulting concept.
+assistant: steam
+```
+
+Durante el entrenamiento, `train.py` ahora imprime al inicio el plan (`train_recipes`, `dev_recipes`, `total_steps`) y en cada log de train agrega `elapsed` y `eta`, tanto localmente como en los logs de Vertex.
+
 ### Reanudar desde checkpoint
 
 ```bash
@@ -401,7 +430,21 @@ gcloud builds submit --config cloudbuild.yaml --project nlp2026-498021
 # 3. Lanzar el entrenamiento (1x NVIDIA L4)
 uv run --group vertex python -m src.sft.vertex_submit \
   --run-name qwen05b-10k --config configs/sft/qwen05b_10k_example.yaml
+
+# Variante Qwen3 4B Thinking con chat template de Qwen
+uv run --group vertex python -m src.sft.vertex_submit \
+  --run-name qwen3-4b-thinking-10k \
+  --config configs/sft/qwen3_4b_thinking_10k_example.yaml
 ```
+
+También podés usar el helper del repo:
+
+```bash
+./scripts/run_vertex_qwen3_thinking.sh
+```
+
+Ese script prioriza ADC si ya corriste `gcloud auth application-default login`; si no encuentra ADC, usa automáticamente `nlp2026-498021-8c813796c042.json` si está en la raíz del repo.
+Si interrumpís el proceso con `Ctrl+C`, el submitter intenta cancelar el `CustomJob` remoto automáticamente.
 
 `train.py` es config-driven: la imagen lleva los YAML de `configs/sft/` horneados y `vertex_submit.py` sobrescribe las rutas para que apunten al mount `/gcs/`. La dependencia `google-cloud-aiplatform` vive en el grupo opt-in `vertex`, por lo que el entrenamiento local y la imagen no la instalan.
 

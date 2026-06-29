@@ -109,6 +109,16 @@ uv run --group vertex python -m src.sft.vertex_submit --run-name <run-name> \
   -- --num_train_epochs 3 --load_in_4bit false --lora_r 16
 ```
 
+Para probar `Qwen/Qwen3-4B-Thinking-2507` con el chat template de Qwen ya configurado:
+
+```bash
+uv run --group vertex python -m src.sft.vertex_submit \
+  --run-name qwen3-4b-thinking-10k \
+  --config configs/sft/qwen3_4b_thinking_10k_example.yaml
+```
+
+Esa config activa `prompt_format: qwen_chat`, por lo que el collator usa `tokenizer.apply_chat_template(...)` y supervisa solo el concepto final dentro del mensaje `assistant`.
+
 > Para validar el pipeline sin gastar GPU, correr un smoke en CPU:
 > `--machine-type n1-standard-8 --accelerator-count 0`.
 

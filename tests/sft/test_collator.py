@@ -1,7 +1,12 @@
 import torch
 import pytest
 
-from src.sft.collator import SFTDataCollator, concept_mask_from_offsets, render_candidate_text
+from src.sft.collator import (
+    SFTDataCollator,
+    concept_mask_from_offsets,
+    render_candidate_text,
+    render_qwen_chat_candidate_text,
+)
 from src.sft.dataset import Candidate, RecipeExample
 
 
@@ -50,6 +55,19 @@ class DummyFastTokenizer:
 
     def save_pretrained(self, path):
         return None
+
+
+class DummyChatTokenizer(DummyFastTokenizer):
+    def apply_chat_template(self, messages, *, tokenize=False, add_generation_prompt=False):
+        assert tokenize is False
+        chunks = []
+        for message in messages:
+            chunks.append(f"<|{message['role']}|>\n{message['content']}\n")
+        if add_generation_prompt:
+            chunks.append("<|assistant|>\n")
+        else:
+            chunks.append("<|end|>")
+        return "".join(chunks)
 
 
 def test_concept_mask_from_offsets_marks_final_concept_span():
@@ -105,3 +123,41 @@ def test_collator_keeps_all_candidates_for_ce_alias():
     assert batch["input_ids"].shape[0] == 2
     assert batch["group_ids"].tolist() == [0, 0]
     assert batch["candidate_weights"].tolist() == pytest.approx([0.5, 0.5])
+
+
+def test_render_qwen_chat_candidate_text_marks_only_assistant_output():
+    text, start, end = render_qwen_chat_candidate_text(
+        DummyChatTokenizer(),
+        "fire",
+        "water",
+        "steam",
+        system_prompt="You are a careful crafting assistant.",
+    )
+
+    assert text[start:end] == "steam"
+    assert text[end:].startswith("\n<|end|>")
+    assert "Given two concepts, combine them into one resulting concept." in text
+    assert "Concept A: fire" in text
+    assert "Concept B: water" in text
+    assert "Return only the resulting concept." in text
+
+
+def test_collator_supports_qwen_chat_prompt_format():
+    examples = [
+        RecipeExample(
+            input_a="fire",
+            input_b="water",
+            candidates=[Candidate(output="steam", rank=1, weight=1.0)],
+        )
+    ]
+
+    batch = SFTDataCollator(
+        DummyChatTokenizer(),
+        max_seq_length=256,
+        prompt_format="qwen_chat",
+        system_prompt="Return the final concept only.",
+    )(examples)
+
+    assert batch["input_ids"].shape[0] == 1
+    assert batch["concept_mask"].sum().item() == len("steam")
+    assert batch["concept_mask"].any(dim=1).all()

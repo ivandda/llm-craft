@@ -77,3 +77,16 @@ def test_concept_set_uniform_alias_populates_both_axes():
 def test_validate_config_rejects_invalid_candidate_weighting():
     with pytest.raises(ValueError, match="candidate_weighting"):
         config_from_args(parse_args(["--candidate_weighting", "bad"]))
+
+
+def test_prompt_format_accepts_qwen_chat():
+    args = parse_args(["--prompt_format", "qwen_chat"])
+
+    config = config_from_args(args)
+
+    assert config.prompt_format == "qwen_chat"
+
+
+def test_validate_config_rejects_invalid_prompt_format():
+    with pytest.raises(ValueError, match="prompt_format"):
+        config_from_args(parse_args(["--prompt_format", "bad"]))

@@ -19,6 +19,8 @@ class SFTConfig:
     dev_path: str = "datasets/final-small-dataset/dev.jsonl"
     output_dir: str = "runs/sft"
     run_name: str | None = None
+    prompt_format: str = "plain"
+    system_prompt: str | None = None
     loss_type: str = "concept_set"  # Legacy/convenience alias for the explicit loss axes below.
     ce_target: str = "rank1"  # Legacy no-op kept for backwards compatibility.
     candidate_weighting: str = "dataset"  # Recommended explicit loss axis.
@@ -148,6 +150,8 @@ def resolve_loss_alias(loss_type: str) -> tuple[str, str]:
 
 def validate_config(config: SFTConfig) -> None:
     resolve_loss_alias(config.loss_type)
+    if config.prompt_format not in {"plain", "qwen_chat"}:
+        raise ValueError("prompt_format must be one of: plain, qwen_chat")
     if config.ce_target not in {"rank1", "observed", "first"}:
         raise ValueError("ce_target must be one of: rank1, observed, first")
     if config.candidate_weighting not in {"uniform", "dataset"}:

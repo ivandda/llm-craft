@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import time
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +18,7 @@ from src.sft.losses import compute_sft_loss
 from src.sft.plotting import plot_losses
 from src.sft.utils import (
     append_jsonl,
+    format_duration,
     latest_checkpoint_file,
     rotate_checkpoints,
     save_rng_state,
@@ -123,10 +125,14 @@ def build_dataloaders(config: SFTConfig, tokenizer: Any) -> tuple[DataLoader, Da
     train_collator = SFTDataCollator(
         tokenizer=tokenizer,
         max_seq_length=config.max_seq_length,
+        prompt_format=config.prompt_format,
+        system_prompt=config.system_prompt,
     )
     eval_collator = SFTDataCollator(
         tokenizer=tokenizer,
         max_seq_length=config.max_seq_length,
+        prompt_format=config.prompt_format,
+        system_prompt=config.system_prompt,
     )
     # `per_device_*_batch_size` counts recipes. Each collated batch can expand to
     # more tokenized rows because every candidate for a recipe stays in the batch.
@@ -254,6 +260,16 @@ def train(config: SFTConfig, run_dir: Path) -> dict[str, Any]:
         total_steps = total_epochs * updates_per_epoch
     warmup_steps = int(total_steps * config.warmup_ratio)
     scheduler = get_linear_schedule_with_warmup(optimizer, warmup_steps, total_steps)
+    if accelerator.is_main_process:
+        print(
+            "[sft] plan "
+            f"train_recipes={len(train_loader.dataset)} "
+            f"dev_recipes={len(dev_loader.dataset)} "
+            f"updates_per_epoch={updates_per_epoch} "
+            f"total_epochs={total_epochs} "
+            f"total_steps={total_steps}",
+            flush=True,
+        )
 
     model, optimizer, train_loader, dev_loader, scheduler = accelerator.prepare(
         model,
@@ -266,6 +282,7 @@ def train(config: SFTConfig, run_dir: Path) -> dict[str, Any]:
     latest_checkpoint: str | None = config.resume_from_checkpoint
     running_loss = 0.0
     running_count = 0
+    train_start_time = time.perf_counter()
 
     model.train()
     for epoch in range(start_epoch, total_epochs):
@@ -287,11 +304,28 @@ def train(config: SFTConfig, run_dir: Path) -> dict[str, Any]:
                     avg_loss = running_loss / max(1, running_count)
                     running_loss = 0.0
                     running_count = 0
+                    elapsed_seconds = max(0.0, time.perf_counter() - train_start_time)
+                    avg_step_seconds = elapsed_seconds / max(1, global_step)
+                    remaining_steps = max(0, total_steps - global_step)
+                    eta_seconds = avg_step_seconds * remaining_steps
                     record = {"step": global_step, "epoch": epoch, "loss": avg_loss}
                     if accelerator.is_main_process:
-                        print(f"[sft] step={global_step} epoch={epoch} train_loss={avg_loss:.4f}", flush=True)
+                        print(
+                            f"[sft] step={global_step} epoch={epoch} train_loss={avg_loss:.4f} "
+                            f"elapsed={format_duration(elapsed_seconds)} "
+                            f"eta={format_duration(eta_seconds)}",
+                            flush=True,
+                        )
                         append_jsonl(run_dir / "train_losses.jsonl", record)
-                        append_jsonl(run_dir / "metrics.jsonl", {"split": "train", **record})
+                        append_jsonl(
+                            run_dir / "metrics.jsonl",
+                            {
+                                "split": "train",
+                                "elapsed_seconds": elapsed_seconds,
+                                "eta_seconds": eta_seconds,
+                                **record,
+                            },
+                        )
 
                 if config.eval_steps > 0 and global_step % config.eval_steps == 0:
                     dev_loss = evaluate(model, dev_loader, config, accelerator)

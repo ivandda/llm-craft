@@ -8,8 +8,20 @@ import torch
 from src.sft.dataset import RecipeExample
 
 
+OUTPUT_SENTINEL = "<<LLM_CRAFT_OUTPUT_SENTINEL>>"
+
+
 def render_prefix(input_a: str, input_b: str) -> str:
     return f"Input A: {input_a}\nInput B: {input_b}\nFinal concept:"
+
+
+def render_user_prompt(input_a: str, input_b: str) -> str:
+    return (
+        "Given two concepts, combine them into one resulting concept.\n\n"
+        f"Concept A: {input_a}\n"
+        f"Concept B: {input_b}\n\n"
+        "Return only the resulting concept."
+    )
 
 
 def render_candidate_text(input_a: str, input_b: str, output: str) -> tuple[str, int, int]:
@@ -18,6 +30,46 @@ def render_candidate_text(input_a: str, input_b: str, output: str) -> tuple[str,
     start = len(prefix) + 1
     end = start + len(output)
     return text, start, end
+
+
+def _sentinel_for_output(output: str) -> str:
+    sentinel = OUTPUT_SENTINEL
+    suffix = 0
+    while sentinel in output:
+        suffix += 1
+        sentinel = f"{OUTPUT_SENTINEL}_{suffix}"
+    return sentinel
+
+
+def render_qwen_chat_candidate_text(
+    tokenizer: Any,
+    input_a: str,
+    input_b: str,
+    output: str,
+    *,
+    system_prompt: str | None = None,
+) -> tuple[str, int, int]:
+    if not hasattr(tokenizer, "apply_chat_template"):
+        raise ValueError("prompt_format='qwen_chat' requires a tokenizer with apply_chat_template().")
+
+    sentinel = _sentinel_for_output(output)
+    messages = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": render_user_prompt(input_a, input_b)})
+    messages.append({"role": "assistant", "content": sentinel})
+    rendered = tokenizer.apply_chat_template(
+        messages,
+        tokenize=False,
+        add_generation_prompt=False,
+    )
+    if not isinstance(rendered, str) or sentinel not in rendered:
+        raise ValueError("The chat template did not preserve the assistant sentinel span.")
+
+    concept_start = rendered.index(sentinel)
+    text = rendered.replace(sentinel, output, 1)
+    concept_end = concept_start + len(output)
+    return text, concept_start, concept_end
 
 
 def concept_mask_from_offsets(
@@ -35,6 +87,8 @@ def concept_mask_from_offsets(
 class SFTDataCollator:
     tokenizer: Any
     max_seq_length: int = 256
+    prompt_format: str = "plain"
+    system_prompt: str | None = None
     loss_type: str = "concept_set"
     ce_target: str = "rank1"
 
@@ -47,7 +101,20 @@ class SFTDataCollator:
     def _rows_for_example(self, example: RecipeExample, group_id: int) -> list[dict[str, Any]]:
         rows = []
         for candidate in example.candidates:
-            text, concept_start, concept_end = render_candidate_text(example.input_a, example.input_b, candidate.output)
+            if self.prompt_format == "plain":
+                text, concept_start, concept_end = render_candidate_text(
+                    example.input_a, example.input_b, candidate.output
+                )
+            elif self.prompt_format == "qwen_chat":
+                text, concept_start, concept_end = render_qwen_chat_candidate_text(
+                    self.tokenizer,
+                    example.input_a,
+                    example.input_b,
+                    candidate.output,
+                    system_prompt=self.system_prompt,
+                )
+            else:
+                raise ValueError(f"Unsupported prompt_format: {self.prompt_format}")
             rows.append(
                 {
                     "text": text,

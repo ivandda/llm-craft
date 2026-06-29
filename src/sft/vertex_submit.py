@@ -13,6 +13,7 @@ Run locally (the 'vertex' group provides google-cloud-aiplatform on demand):
 """
 
 import argparse
+import contextlib
 from datetime import datetime, timezone
 
 from google.cloud import aiplatform
@@ -87,6 +88,16 @@ def build_train_args(args: argparse.Namespace, run_name: str) -> list[str]:
     return train_args + extra
 
 
+def job_resource_name(job: aiplatform.CustomJob) -> str | None:
+    with contextlib.suppress(Exception):
+        return job.resource_name
+    with contextlib.suppress(Exception):
+        resource = getattr(job, "_gca_resource", None)
+        if resource is not None:
+            return getattr(resource, "name", None)
+    return None
+
+
 def main() -> None:
     args = parse_args()
     run_name = args.run_name or default_run_name()
@@ -119,7 +130,22 @@ def main() -> None:
     print(f"Submitting Vertex CustomJob '{run_name}'")
     print(f"  image:  {args.image_uri}")
     print(f"  output: gs://{BUCKET}/runs/ (run dir created by train.py)")
-    job.run()
+    try:
+        job.run()
+    except KeyboardInterrupt:
+        resource_name = job_resource_name(job)
+        print("[vertex-submit] Interrupted locally (Ctrl+C).", flush=True)
+        if resource_name is None:
+            print(
+                "[vertex-submit] The CustomJob was not submitted yet, so there is nothing to cancel remotely.",
+                flush=True,
+            )
+        else:
+            print(f"[vertex-submit] Attempting to cancel remote job: {resource_name}", flush=True)
+            with contextlib.suppress(Exception):
+                job.cancel()
+            print("[vertex-submit] Cancellation requested. Verify the final state in Vertex AI.", flush=True)
+        raise SystemExit(130)
 
 
 if __name__ == "__main__":

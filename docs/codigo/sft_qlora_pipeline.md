@@ -70,6 +70,19 @@ Final concept: {candidate_output}
 
 El collator usa `return_offsets_mapping=True` de tokenizers rápidos para marcar únicamente el span de `{candidate_output}` en `concept_mask`.
 
+Opcionalmente, `prompt_format: qwen_chat` renderiza un prompt estilo instrucción dentro del `chat template` del tokenizer. Esto está pensado para variantes Qwen chat/thinking: el usuario recibe el bloque
+
+```text
+Given two concepts, combine them into one resulting concept.
+
+Concept A: {input_a}
+Concept B: {input_b}
+
+Return only the resulting concept.
+```
+
+y el candidato supervisado se inserta como contenido del mensaje `assistant`. El span supervisado sigue siendo solo el concepto final, no los tokens estructurales del template ni trazas de razonamiento.
+
 ## Outputs
 
 Cada ejecución escribe:
