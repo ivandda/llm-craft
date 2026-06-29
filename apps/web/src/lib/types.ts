@@ -61,9 +61,26 @@ export type GoalPreset = {
   target: ElementToken;
   metadata: {
     difficulty: string;
-    status: "mock";
+    status: "mock" | "generated";
+    depth: number;
   };
   initialInventory: ElementToken[];
+};
+
+export type RandomGoalRequest = {
+  depth: number;
+};
+
+export type DpoPreferenceRequest = {
+  mode: GameMode;
+  goalId?: string;
+  inputA: ElementToken;
+  inputB: ElementToken;
+  shownOutputs: ElementToken[];
+  selectedOutput: ElementToken;
+  inventorySnapshot: ElementToken[];
+  combinationIndex: number;
+  source: CombineSource;
 };
 
 export type GameSnapshot = {

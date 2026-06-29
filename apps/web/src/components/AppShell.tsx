@@ -5,6 +5,7 @@ import {
   requestLogin,
   requestLogout,
   requestProfileUpdate,
+  requestRandomGoal,
   requestRegister,
   type AuthSession
 } from "@/lib/api";
@@ -17,6 +18,7 @@ import type {
   AuthUser,
   GameMode,
   GameSnapshot,
+  GoalPreset,
   UserProfile
 } from "@/lib/types";
 import { CraftGame } from "@/components/CraftGame";
@@ -47,9 +49,15 @@ const EMPTY_SNAPSHOT: GameSnapshot = {
 export function AppShell() {
   const [session, setSession] = useState<AuthSession | null>(null);
   const [selectedMode, setSelectedMode] = useState<GameMode | null>(null);
+  const [goalDepth, setGoalDepth] = useState(3);
+  const [activeGoalPreset, setActiveGoalPreset] = useState<GoalPreset>(GOAL_PRESET);
   const [snapshot, setSnapshot] = useState<GameSnapshot>(EMPTY_SNAPSHOT);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isLoadingSession, setIsLoadingSession] = useState(true);
+  const [isGeneratingGoal, setIsGeneratingGoal] = useState(false);
+  const [goalGenerationMessage, setGoalGenerationMessage] = useState<string | null>(
+    null
+  );
 
   useEffect(() => {
     requestCurrentSession()
@@ -61,8 +69,29 @@ export function AppShell() {
     await requestLogout();
     setSession(null);
     setSelectedMode(null);
+    setActiveGoalPreset(GOAL_PRESET);
     setSnapshot(EMPTY_SNAPSHOT);
     setIsProfileOpen(false);
+  }
+
+  async function handleSelectMode(mode: GameMode) {
+    if (mode === "sandbox") {
+      setSelectedMode("sandbox");
+      return;
+    }
+
+    setIsGeneratingGoal(true);
+    setGoalGenerationMessage(null);
+
+    try {
+      setActiveGoalPreset(await requestRandomGoal({ depth: goalDepth }));
+    } catch {
+      setActiveGoalPreset(GOAL_PRESET);
+      setGoalGenerationMessage("Random goal unavailable. Using fallback goal.");
+    } finally {
+      setIsGeneratingGoal(false);
+      setSelectedMode("goal");
+    }
   }
 
   if (isLoadingSession) {
@@ -90,16 +119,20 @@ export function AppShell() {
     return (
       <ModeMenu
         user={session.user}
+        goalDepth={goalDepth}
+        goalGenerationMessage={goalGenerationMessage}
+        isGeneratingGoal={isGeneratingGoal}
+        onGoalDepthChange={setGoalDepth}
         onLogout={handleLogout}
         onOpenProfile={() => setIsProfileOpen(true)}
-        onSelectMode={setSelectedMode}
+        onSelectMode={handleSelectMode}
       />
     );
   }
 
   return (
     <CraftGame
-      goalPreset={GOAL_PRESET}
+      goalPreset={activeGoalPreset}
       mode={selectedMode}
       user={session.user}
       onBackToMenu={() => setSelectedMode(null)}
@@ -234,15 +267,23 @@ function AuthPanel({ onAuthenticated }: { onAuthenticated: (session: AuthSession
 }
 
 function ModeMenu({
+  goalDepth,
+  goalGenerationMessage,
+  isGeneratingGoal,
   user,
+  onGoalDepthChange,
   onLogout,
   onOpenProfile,
   onSelectMode
 }: {
+  goalDepth: number;
+  goalGenerationMessage: string | null;
+  isGeneratingGoal: boolean;
   user: AuthUser;
+  onGoalDepthChange: (depth: number) => void;
   onLogout: () => void;
   onOpenProfile: () => void;
-  onSelectMode: (mode: GameMode) => void;
+  onSelectMode: (mode: GameMode) => void | Promise<void>;
 }) {
   return (
     <main className="min-h-screen bg-[#f6f2e8] px-4 py-6 text-zinc-950">
@@ -274,14 +315,35 @@ function ModeMenu({
           />
           <ModeCard
             accentClassName="border-sky-300 bg-sky-50 hover:border-sky-400 hover:bg-sky-100"
+            disabled={isGeneratingGoal}
             icon={<Target size={22} />}
-            modeLabel={GOAL_PRESET.objective}
+            modeLabel={`Random goal at depth ${goalDepth}`}
             previewElements={["🧭", "🛤️", "📍", "🎯"]}
             resultElement="🏁"
-            label="Goal"
+            label={isGeneratingGoal ? "Generating" : "Goal"}
             onClick={() => onSelectMode("goal")}
           />
         </section>
+        <div className="flex flex-wrap items-center gap-3 rounded-md border border-sky-200 bg-white/80 px-4 py-3 shadow-hairline">
+          <label className="flex items-center gap-3 text-sm font-semibold text-zinc-700">
+            <span>Goal depth</span>
+            <select
+              className="h-9 rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-zinc-500"
+              disabled={isGeneratingGoal}
+              onChange={(event) => onGoalDepthChange(Number(event.target.value))}
+              value={goalDepth}
+            >
+              {Array.from({ length: 10 }, (_, index) => index + 1).map((value) => (
+                <option key={value} value={value}>
+                  {value}
+                </option>
+              ))}
+            </select>
+          </label>
+          {goalGenerationMessage ? (
+            <p className="text-sm text-amber-700">{goalGenerationMessage}</p>
+          ) : null}
+        </div>
       </div>
     </main>
   );
@@ -289,6 +351,7 @@ function ModeMenu({
 
 function ModeCard({
   accentClassName,
+  disabled = false,
   icon,
   label,
   modeLabel,
@@ -297,6 +360,7 @@ function ModeCard({
   resultElement
 }: {
   accentClassName: string;
+  disabled?: boolean;
   icon: ReactNode;
   label: string;
   modeLabel: string;
@@ -307,6 +371,7 @@ function ModeCard({
   return (
     <button
       className={`group relative min-h-[360px] overflow-hidden rounded-md border-2 p-5 text-left shadow-hairline transition duration-200 hover:-translate-y-1 hover:shadow-xl active:translate-y-0 ${accentClassName}`}
+      disabled={disabled}
       onClick={onClick}
       type="button"
     >

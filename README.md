@@ -409,7 +409,7 @@ RUN_SFT_SMOKE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run pytest tests/sft/test_sm
 
 ## Frontend
 
-La interfaz jugable vive en `apps/web` como una app Next.js preparada para conectar modelos más adelante mediante contratos mock tipados. Incluye registro/login mock en memoria con credenciales seeded `admin/admin`, menu de modos (`Sandbox` y `Goal`), perfil con logros destacados y leaderboard mock para objetivos completados.
+La interfaz jugable vive en `apps/web` como una app Next.js preparada para conectar modelos más adelante mediante contratos mock tipados. Incluye registro/login mock con credenciales seeded `admin/admin`, menu de modos (`Sandbox` y `Goal`), metas aleatorias por profundidad, `DPO test mode`, perfil con logros destacados y leaderboard mock para objetivos completados.
 
 ```bash
 cd apps/web

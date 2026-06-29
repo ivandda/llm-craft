@@ -7,6 +7,7 @@ import {
   mergeInventory,
   normalizeConcept
 } from "@/lib/craft";
+import { selectDpoCandidates } from "@/lib/dpo";
 import { GOAL_PRESET, getInitialInventoryForMode } from "@/lib/gameModes";
 import { createGameStorageKey } from "@/lib/gameStorage";
 import {
@@ -18,6 +19,12 @@ import {
   listLeaderboard,
   saveLeaderboardEntry
 } from "@/lib/server/mockLeaderboard";
+import {
+  buildRandomGoalFromRecipes,
+  generateRandomGoal,
+  isValidGoalDepth
+} from "@/lib/server/randomGoals";
+import { saveDpoPreference } from "@/lib/server/dpoPreferences";
 
 const dbMock = vi.hoisted(() => {
   type UserRow = {
@@ -37,10 +44,32 @@ const dbMock = vi.hoisted(() => {
     combinations_used: number;
     completed_at: Date;
   };
+  type RecipeRow = {
+    input_a: string;
+    input_b: string;
+    output: string;
+  };
+  type DpoPreferenceRow = {
+    id: string;
+    user_id: string;
+    mode: string;
+    goal_id: string | null;
+    input_a: unknown;
+    input_b: unknown;
+    shown_outputs: unknown[];
+    selected_output: unknown;
+    rejected_outputs: unknown[];
+    inventory_snapshot: unknown[];
+    combination_index: number;
+    source: string;
+    created_at: Date;
+  };
 
   const users = new Map<string, UserRow>();
   const sessions = new Map<string, string>();
   const leaderboard = new Map<string, LeaderboardRow>();
+  const recipeRows: RecipeRow[] = [];
+  const dpoPreferenceEvents: DpoPreferenceRow[] = [];
 
   async function query(sql: string, params: unknown[] = []) {
     const normalizedSql = sql.toLowerCase().replace(/\s+/g, " ");
@@ -77,6 +106,60 @@ const dbMock = vi.hoisted(() => {
       const [sessionId, userId] = params as string[];
       sessions.set(sessionId, userId);
       return { rows: [] };
+    }
+
+    if (
+      normalizedSql.includes("from recipe_pairs") &&
+      normalizedSql.includes("join recipe_candidates")
+    ) {
+      return { rows: recipeRows };
+    }
+
+    if (normalizedSql.includes("insert into dpo_preference_events")) {
+      const [
+        id,
+        userId,
+        mode,
+        goalId,
+        inputA,
+        inputB,
+        shownOutputs,
+        selectedOutput,
+        rejectedOutputs,
+        inventorySnapshot,
+        combinationIndex,
+        source
+      ] = params as [
+        string,
+        string,
+        string,
+        string | null,
+        unknown,
+        unknown,
+        unknown[],
+        unknown,
+        unknown[],
+        unknown[],
+        number,
+        string
+      ];
+      const row = {
+        id,
+        user_id: userId,
+        mode,
+        goal_id: goalId,
+        input_a: inputA,
+        input_b: inputB,
+        shown_outputs: shownOutputs,
+        selected_output: selectedOutput,
+        rejected_outputs: rejectedOutputs,
+        inventory_snapshot: inventorySnapshot,
+        combination_index: combinationIndex,
+        source,
+        created_at: new Date("2026-06-29T00:00:00.000Z")
+      };
+      dpoPreferenceEvents.push(row);
+      return { rows: [row] };
     }
 
     if (normalizedSql.includes("insert into leaderboard_entries")) {
@@ -135,7 +218,13 @@ const dbMock = vi.hoisted(() => {
       users.clear();
       sessions.clear();
       leaderboard.clear();
+      recipeRows.splice(0);
+      dpoPreferenceEvents.splice(0);
     },
+    setRecipeRows(rows: RecipeRow[]) {
+      recipeRows.splice(0, recipeRows.length, ...rows);
+    },
+    dpoPreferenceEvents,
     transaction: vi.fn(async (callback) => callback({ query }))
   };
 });
@@ -182,6 +271,7 @@ describe("craft utilities", () => {
     const secondResponse = combineElements(request);
 
     expect(firstResponse.source).toBe("mock_model");
+    expect(firstResponse.result.name).toMatch(/^combined_/);
     expect(firstResponse.result).toEqual(secondResponse.result);
   });
 
@@ -230,13 +320,100 @@ describe("craft utilities", () => {
 
   it("defines the static goal preset inventory and objective", () => {
     expect(GOAL_PRESET.mode).toBe("goal");
-    expect(GOAL_PRESET.target.id).toBe("grass");
-    expect(GOAL_PRESET.objective).toContain("grass");
+    expect(GOAL_PRESET.target.id).toBe("plant");
+    expect(GOAL_PRESET.objective).toContain("plant");
+    expect(GOAL_PRESET.metadata.depth).toBe(1);
     expect(getInitialInventoryForMode("goal").map((element) => element.id)).toEqual([
       "earth",
       "rain"
     ]);
     expect(getInitialInventoryForMode("sandbox")).toEqual(BASE_ELEMENTS);
+  });
+
+  it("generates a random goal with an exact playable depth", () => {
+    const goal = buildRandomGoalFromRecipes(
+      [
+        { inputA: "water", inputB: "fire", output: "steam" },
+        { inputA: "earth", inputB: "water", output: "mud" },
+        { inputA: "steam", inputB: "mud", output: "geyser" }
+      ],
+      3,
+      () => 0
+    );
+
+    expect(goal?.metadata.status).toBe("generated");
+    expect(goal?.metadata.depth).toBe(3);
+    expect(goal?.target.id).toBe("geyser");
+    expect(goal?.initialInventory).toEqual(BASE_ELEMENTS);
+  });
+
+  it("rejects invalid random goal depths", () => {
+    expect(isValidGoalDepth(0)).toBe(false);
+    expect(isValidGoalDepth(21)).toBe(false);
+    expect(isValidGoalDepth(3.5)).toBe(false);
+    expect(isValidGoalDepth(3)).toBe(true);
+  });
+
+  it("falls back when no dataset recipes can build a random goal", async () => {
+    dbMock.setRecipeRows([]);
+
+    await expect(generateRandomGoal(3)).resolves.toEqual(GOAL_PRESET);
+  });
+
+  it("selects DPO candidates only when multiple real outputs exist", () => {
+    expect(selectDpoCandidates([createElementToken("steam")])).toEqual([]);
+
+    const twoCandidates = selectDpoCandidates(
+      [createElementToken("steam"), createElementToken("mist")],
+      () => 0
+    );
+    const threeCandidates = selectDpoCandidates(
+      [
+        createElementToken("steam"),
+        createElementToken("mist"),
+        createElementToken("hot spring"),
+        createElementToken("cloud")
+      ],
+      () => 0
+    );
+
+    expect(twoCandidates).toHaveLength(2);
+    expect(threeCandidates).toHaveLength(3);
+  });
+
+  it("stores selected and rejected DPO outputs", async () => {
+    const user = {
+      id: "dpo-test-user",
+      username: "dpo",
+      displayName: "DPO"
+    };
+    const selectedOutput = createElementToken("steam");
+
+    const event = await saveDpoPreference({
+      user,
+      preference: {
+        mode: "goal",
+        goalId: "random-depth-3-steam",
+        inputA: createElementToken("fire"),
+        inputB: createElementToken("water"),
+        shownOutputs: [
+          selectedOutput,
+          createElementToken("mist"),
+          createElementToken("hot spring")
+        ],
+        selectedOutput,
+        inventorySnapshot: BASE_ELEMENTS,
+        combinationIndex: 1,
+        source: "known_recipe"
+      }
+    });
+
+    expect(event.selectedOutput.id).toBe("steam");
+    expect(event.rejectedOutputs.map((output) => output.id)).toEqual([
+      "mist",
+      "hot spring"
+    ]);
+    expect(dbMock.dpoPreferenceEvents).toHaveLength(1);
   });
 
   it("seeds admin credentials for database auth", async () => {

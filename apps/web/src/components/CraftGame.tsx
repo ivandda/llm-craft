@@ -2,10 +2,12 @@
 
 import {
   requestCombination,
+  requestDpoPreference,
   requestLeaderboard,
   requestLeaderboardSubmission
 } from "@/lib/api";
 import { mergeInventory } from "@/lib/craft";
+import { selectDpoCandidates } from "@/lib/dpo";
 import { getInitialInventoryForMode } from "@/lib/gameModes";
 import { createGameStorageKey } from "@/lib/gameStorage";
 import type {
@@ -82,6 +84,19 @@ type GoalCompletion = {
   errorMessage?: string;
 };
 
+type PendingDpoChoice = {
+  firstInput: ElementToken;
+  secondInput: ElementToken;
+  response: CombineResponse;
+  candidates: ElementToken[];
+  clientX: number;
+  clientY: number;
+  usedInstanceIds: string[];
+  combinationIndex: number;
+  isSaving: boolean;
+  errorMessage?: string;
+};
+
 export function CraftGame({
   user,
   mode,
@@ -94,14 +109,21 @@ export function CraftGame({
   const boardRef = useRef<HTMLDivElement | null>(null);
   const blackHoleRef = useRef<HTMLDivElement | null>(null);
   const sweepTimeoutRef = useRef<number | null>(null);
-  const initialInventory = useMemo(() => getInitialInventoryForMode(mode), [mode]);
+  const initialInventory = useMemo(
+    () =>
+      mode === "goal" && goalPreset
+        ? goalPreset.initialInventory
+        : getInitialInventoryForMode(mode),
+    [goalPreset, mode]
+  );
   const storageKeys = useMemo(
     () => ({
       inventory: createGameStorageKey(user.id, mode, "inventory"),
       history: createGameStorageKey(user.id, mode, "history"),
       board: createGameStorageKey(user.id, mode, "board"),
       darkMode: createGameStorageKey(user.id, mode, "darkMode"),
-      consumeInputs: createGameStorageKey(user.id, mode, "consumeInputs")
+      consumeInputs: createGameStorageKey(user.id, mode, "consumeInputs"),
+      dpoTestMode: createGameStorageKey(user.id, mode, "dpoTestMode")
     }),
     [mode, user.id]
   );
@@ -117,6 +139,10 @@ export function CraftGame({
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [consumeInputsOnCombine, setConsumeInputsOnCombine] = useState(true);
+  const [isDpoTestMode, setIsDpoTestMode] = useState(false);
+  const [pendingDpoChoice, setPendingDpoChoice] = useState<PendingDpoChoice | null>(
+    null
+  );
   const [isSweeping, setIsSweeping] = useState(false);
   const [sweepTarget, setSweepTarget] = useState<Point | null>(null);
   const [hasHydratedStorage, setHasHydratedStorage] = useState(false);
@@ -125,22 +151,30 @@ export function CraftGame({
 
   useEffect(() => {
     setHasHydratedStorage(false);
-    const storedInventory = readStoredValue(storageKeys.inventory, initialInventory);
+    const shouldRestoreState =
+      mode !== "goal" || goalPreset?.metadata.status !== "generated";
+    const storedInventory = shouldRestoreState
+      ? readStoredValue(storageKeys.inventory, initialInventory)
+      : initialInventory;
 
     setInventory(storedInventory);
-    setHistory(readStoredValue(storageKeys.history, []));
+    setHistory(shouldRestoreState ? readStoredValue(storageKeys.history, []) : []);
     setBoardElements(
-      readStoredValue(storageKeys.board, createInitialBoard(storedInventory))
+      shouldRestoreState
+        ? readStoredValue(storageKeys.board, createInitialBoard(storedInventory))
+        : createInitialBoard(storedInventory)
     );
     setIsDarkMode(readStoredValue(storageKeys.darkMode, false));
     setConsumeInputsOnCombine(readStoredValue(storageKeys.consumeInputs, true));
+    setIsDpoTestMode(readStoredValue(storageKeys.dpoTestMode, false));
+    setPendingDpoChoice(null);
     setResult(null);
     setErrorMessage(null);
     setQuery("");
     setDragState(null);
     setGoalCompletion(null);
     setHasHydratedStorage(true);
-  }, [initialInventory, storageKeys]);
+  }, [goalPreset?.metadata.status, initialInventory, mode, storageKeys]);
 
   useEffect(() => {
     if (mode !== "goal" || !goalPreset) {
@@ -187,6 +221,15 @@ export function CraftGame({
   }, [consumeInputsOnCombine, hasHydratedStorage, storageKeys.consumeInputs]);
 
   useEffect(() => {
+    if (hasHydratedStorage) {
+      window.localStorage.setItem(
+        storageKeys.dpoTestMode,
+        JSON.stringify(isDpoTestMode)
+      );
+    }
+  }, [hasHydratedStorage, isDpoTestMode, storageKeys.dpoTestMode]);
+
+  useEffect(() => {
     onSnapshotChange?.({ inventory, history });
   }, [history, inventory, onSnapshotChange]);
 
@@ -218,6 +261,7 @@ export function CraftGame({
     setResult(null);
     setErrorMessage(null);
     setDragState(null);
+    setPendingDpoChoice(null);
     setGoalCompletion(null);
   }
 
@@ -278,50 +322,130 @@ export function CraftGame({
         inputB: secondInput,
         inventory
       });
-      const discoveredAt = new Date().toISOString();
-      const output = { ...response.result, discoveredAt };
-      const nextResult = { ...response, result: output };
       const combinationsUsed = history.length + 1;
+      const dpoCandidates = isDpoTestMode
+        ? selectDpoCandidates(response.knownOutputs)
+        : [];
 
-      setResult(nextResult);
-      setInventory((currentInventory) => mergeInventory(currentInventory, output));
-      setBoardElements((currentElements) => {
-        const remainingElements = consumeInputsOnCombine
-          ? currentElements.filter(
-              (element) => !usedInstanceIds.includes(element.instanceId)
-            )
-          : currentElements;
-
-        return [
-          ...remainingElements,
-          createBoardElement(
-            output,
-            ...getResultPosition(clientX, clientY),
-            getNextZIndex(remainingElements)
-          )
-        ];
-      });
-      setHistory((currentHistory) =>
-        [
-          {
-            id: `${firstInput.id}+${secondInput.id}=>${output.id}:${discoveredAt}`,
-            inputA: firstInput,
-            inputB: secondInput,
-            output,
-            source: response.source,
-            createdAt: discoveredAt
-          },
-          ...currentHistory
-        ].slice(0, 30)
-      );
-
-      if (isGoalTarget(output) && !goalCompletion) {
-        void completeGoal(combinationsUsed);
+      if (dpoCandidates.length >= 2) {
+        setPendingDpoChoice({
+          firstInput,
+          secondInput,
+          response,
+          candidates: dpoCandidates,
+          clientX,
+          clientY,
+          usedInstanceIds,
+          combinationIndex: combinationsUsed,
+          isSaving: false
+        });
+        return;
       }
+
+      applyCombinationResult({
+        firstInput,
+        secondInput,
+        response,
+        output: response.result,
+        clientX,
+        clientY,
+        usedInstanceIds,
+        combinationsUsed
+      });
     } catch {
       setErrorMessage("The combination could not be completed.");
     } finally {
       setIsCombining(false);
+    }
+  }
+
+  async function selectDpoOutput(output: ElementToken) {
+    if (!pendingDpoChoice) {
+      return;
+    }
+
+    setPendingDpoChoice({ ...pendingDpoChoice, isSaving: true, errorMessage: undefined });
+
+    try {
+      await requestDpoPreference({
+        mode,
+        goalId: goalPreset?.id,
+        inputA: pendingDpoChoice.firstInput,
+        inputB: pendingDpoChoice.secondInput,
+        shownOutputs: pendingDpoChoice.candidates,
+        selectedOutput: output,
+        inventorySnapshot: inventory,
+        combinationIndex: pendingDpoChoice.combinationIndex,
+        source: pendingDpoChoice.response.source
+      });
+      applyCombinationResult({
+        firstInput: pendingDpoChoice.firstInput,
+        secondInput: pendingDpoChoice.secondInput,
+        response: pendingDpoChoice.response,
+        output,
+        clientX: pendingDpoChoice.clientX,
+        clientY: pendingDpoChoice.clientY,
+        usedInstanceIds: pendingDpoChoice.usedInstanceIds,
+        combinationsUsed: pendingDpoChoice.combinationIndex
+      });
+      setPendingDpoChoice(null);
+    } catch {
+      setPendingDpoChoice({
+        ...pendingDpoChoice,
+        isSaving: false,
+        errorMessage: "Preference could not be saved."
+      });
+    }
+  }
+
+  function applyCombinationResult(input: {
+    firstInput: ElementToken;
+    secondInput: ElementToken;
+    response: CombineResponse;
+    output: ElementToken;
+    clientX: number;
+    clientY: number;
+    usedInstanceIds: string[];
+    combinationsUsed: number;
+  }) {
+    const discoveredAt = new Date().toISOString();
+    const output = { ...input.output, discoveredAt };
+    const nextResult = { ...input.response, result: output };
+
+    setResult(nextResult);
+    setInventory((currentInventory) => mergeInventory(currentInventory, output));
+    setBoardElements((currentElements) => {
+      const remainingElements = consumeInputsOnCombine
+        ? currentElements.filter(
+            (element) => !input.usedInstanceIds.includes(element.instanceId)
+          )
+        : currentElements;
+
+      return [
+        ...remainingElements,
+        createBoardElement(
+          output,
+          ...getResultPosition(input.clientX, input.clientY),
+          getNextZIndex(remainingElements)
+        )
+      ];
+    });
+    setHistory((currentHistory) =>
+      [
+        {
+          id: `${input.firstInput.id}+${input.secondInput.id}=>${output.id}:${discoveredAt}`,
+          inputA: input.firstInput,
+          inputB: input.secondInput,
+          output,
+          source: input.response.source,
+          createdAt: discoveredAt
+        },
+        ...currentHistory
+      ].slice(0, 30)
+    );
+
+    if (isGoalTarget(output) && !goalCompletion) {
+      void completeGoal(input.combinationsUsed);
     }
   }
 
@@ -771,6 +895,15 @@ export function CraftGame({
                 type="checkbox"
               />
             </label>
+            <label className="mt-2 flex min-h-11 items-center justify-between gap-3 rounded-md border border-zinc-200 bg-zinc-50 px-3 text-sm font-medium dark:border-zinc-700 dark:bg-zinc-900">
+              <span>DPO test mode</span>
+              <input
+                checked={isDpoTestMode}
+                className="size-4 accent-zinc-950 dark:accent-zinc-50"
+                onChange={(event) => setIsDpoTestMode(event.target.checked)}
+                type="checkbox"
+              />
+            </label>
           </div>
 
           <div className="grid min-h-0 flex-1 grid-cols-2 content-start gap-2 overflow-y-auto pr-1">
@@ -809,6 +942,12 @@ export function CraftGame({
       </div>
 
       {dragState?.kind === "inventory" ? <DragPreview dragState={dragState} /> : null}
+      {pendingDpoChoice ? (
+        <DpoChoiceModal
+          choice={pendingDpoChoice}
+          onSelect={selectDpoOutput}
+        />
+      ) : null}
       {goalCompletion && goalPreset ? (
         <GoalCelebration
           completion={goalCompletion}
@@ -820,6 +959,53 @@ export function CraftGame({
         />
       ) : null}
     </main>
+  );
+}
+
+function DpoChoiceModal({
+  choice,
+  onSelect
+}: {
+  choice: PendingDpoChoice;
+  onSelect: (output: ElementToken) => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-[2147483647] grid place-items-center bg-zinc-950/45 px-4 backdrop-blur-sm">
+      <div className="w-full max-w-xl rounded-md border border-zinc-200 bg-white p-5 text-zinc-950 shadow-2xl">
+        <div>
+          <p className="text-sm font-semibold text-zinc-500">DPO test mode</p>
+          <h2 className="mt-1 text-2xl font-black tracking-normal">
+            Choose the best result
+          </h2>
+          <p className="mt-2 text-sm text-zinc-600">
+            {choice.firstInput.name} + {choice.secondInput.name}
+          </p>
+        </div>
+
+        <div className="mt-5 grid gap-2">
+          {choice.candidates.map((candidate) => (
+            <button
+              className="flex min-h-16 items-center justify-between gap-3 rounded-md border border-zinc-200 bg-zinc-50 px-4 py-3 text-left transition hover:border-zinc-400 hover:bg-white disabled:cursor-wait disabled:opacity-60"
+              disabled={choice.isSaving}
+              key={candidate.id}
+              onClick={() => onSelect(candidate)}
+              type="button"
+            >
+              <span className="truncate text-lg font-semibold capitalize">
+                {candidate.name}
+              </span>
+              <span className="text-sm text-zinc-500">Select</span>
+            </button>
+          ))}
+        </div>
+
+        {choice.errorMessage ? (
+          <p className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            {choice.errorMessage}
+          </p>
+        ) : null}
+      </div>
+    </div>
   );
 }
 

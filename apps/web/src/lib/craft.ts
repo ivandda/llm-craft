@@ -167,8 +167,9 @@ function createFallbackElement(pairKey: string): ElementToken {
   const hash = hashString(pairKey);
   const prefix = FALLBACK_PREFIXES[hash % FALLBACK_PREFIXES.length];
   const noun = FALLBACK_NOUNS[Math.floor(hash / 7) % FALLBACK_NOUNS.length];
+  const mockedName = `${prefix}_${noun}`;
 
-  return createElementToken(`${prefix} ${noun}`);
+  return createElementToken(`combined_${mockedName}`);
 }
 
 function hashString(value: string): number {
