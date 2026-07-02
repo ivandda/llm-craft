@@ -37,12 +37,12 @@ def iter_jsonl(path: Path):
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Import datasets/final-10k into Postgres.")
+    parser = argparse.ArgumentParser(description="Import final-10k train/dev/test splits into Postgres.")
     parser.add_argument("--dataset-name", default=DEFAULT_DATASET_NAME)
     parser.add_argument(
         "--dataset-dir",
         default=str(repo_root() / "datasets" / "final-10k"),
-        help="Path containing train/dev/test/rejected jsonl files.",
+        help="Path containing train/dev/test jsonl files.",
     )
     parser.add_argument(
         "--replace-dataset",
@@ -63,7 +63,7 @@ def read_manifest(dataset_dir: Path, name: str) -> dict[str, Any] | None:
 def insert_dataset_import(connection, dataset_name: str, dataset_dir: Path) -> None:
     metadata = {
         "imported_by": "src.data.import_final10k_to_postgres",
-        "source_files": ["train.jsonl", "dev.jsonl", "test.jsonl", "rejected.jsonl"],
+        "source_files": ["train.jsonl", "dev.jsonl", "test.jsonl"],
     }
     connection.execute(
         """
@@ -81,7 +81,7 @@ def insert_dataset_import(connection, dataset_name: str, dataset_dir: Path) -> N
 def import_split(connection, dataset_name: str, dataset_dir: Path, split: str) -> int:
     count = 0
     path = dataset_dir / f"{split}.jsonl"
-    for line_number, record in iter_jsonl(path):
+    for _line_number, record in iter_jsonl(path):
         input_a, input_b = pair_values(record.get("input_a", ""), record.get("input_b", ""))
         pair_id = stable_id([dataset_name, input_a, input_b])
         connection.execute(
@@ -115,37 +115,6 @@ def import_split(connection, dataset_name: str, dataset_dir: Path, split: str) -
                     Jsonb(candidate),
                 ),
             )
-        count += 1
-    return count
-
-
-def import_rejections(connection, dataset_name: str, dataset_dir: Path) -> int:
-    count = 0
-    path = dataset_dir / "rejected.jsonl"
-    for line_number, record in iter_jsonl(path):
-        input_a, input_b = pair_values(record.get("input_a", ""), record.get("input_b", ""))
-        split = normalize_concept(record.get("split", "unknown")) or "unknown"
-        rejection_id = stable_id([dataset_name, split, str(line_number), input_a, input_b])
-        connection.execute(
-            """
-            INSERT INTO dataset_rejections (
-              rejection_id, dataset_name, split, input_a, input_b, outputs,
-              reject_reason, detail, raw_record
-            )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """,
-            (
-                rejection_id,
-                dataset_name,
-                split,
-                input_a,
-                input_b,
-                Jsonb(record.get("outputs", [])),
-                record.get("reject_reason", ""),
-                record.get("detail"),
-                Jsonb(record),
-            ),
-        )
         count += 1
     return count
 
@@ -216,7 +185,6 @@ def main() -> None:
             split: import_split(connection, dataset_name, dataset_dir, split)
             for split in SPLITS
         }
-        rejected_count = import_rejections(connection, dataset_name, dataset_dir)
         import_manifests(connection, dataset_name, dataset_dir)
         import_batch_index_manifest(connection, dataset_name, dataset_dir)
         connection.execute(
@@ -225,7 +193,7 @@ def main() -> None:
             SET train_count = %s,
                 dev_count = %s,
                 test_count = %s,
-                rejected_count = %s,
+                rejected_count = 0,
                 imported_at = %s
             WHERE dataset_name = %s
             """,
@@ -233,7 +201,6 @@ def main() -> None:
                 split_counts["train"],
                 split_counts["dev"],
                 split_counts["test"],
-                rejected_count,
                 datetime.now(UTC),
                 dataset_name,
             ),
@@ -243,7 +210,7 @@ def main() -> None:
             {
                 "dataset_name": dataset_name,
                 **split_counts,
-                "rejected": rejected_count,
+                "rejected": 0,
             },
             indent=2,
         )

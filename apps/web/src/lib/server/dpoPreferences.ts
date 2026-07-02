@@ -48,7 +48,10 @@ export async function saveDpoPreference(input: {
       selected_output, rejected_outputs, inventory_snapshot, combination_index,
       source
     )
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+    VALUES (
+      $1, $2, $3, $4, $5::jsonb, $6::jsonb, $7::jsonb, $8::jsonb,
+      $9::jsonb, $10::jsonb, $11, $12
+    )
     RETURNING id, user_id, mode, goal_id, input_a, input_b, shown_outputs,
       selected_output, rejected_outputs, inventory_snapshot, combination_index,
       source, created_at
@@ -58,18 +61,22 @@ export async function saveDpoPreference(input: {
       input.user.id,
       input.preference.mode,
       input.preference.goalId ?? null,
-      input.preference.inputA,
-      input.preference.inputB,
-      input.preference.shownOutputs,
-      input.preference.selectedOutput,
-      rejectedOutputs,
-      input.preference.inventorySnapshot,
+      toJsonb(input.preference.inputA),
+      toJsonb(input.preference.inputB),
+      toJsonb(input.preference.shownOutputs),
+      toJsonb(input.preference.selectedOutput),
+      toJsonb(rejectedOutputs),
+      toJsonb(input.preference.inventorySnapshot),
       input.preference.combinationIndex,
       input.preference.source
     ]
   );
 
   return toDpoPreferenceEvent(result.rows[0]);
+}
+
+function toJsonb(value: unknown): string {
+  return JSON.stringify(value);
 }
 
 function toDpoPreferenceEvent(row: DpoPreferenceRow): DpoPreferenceEvent {

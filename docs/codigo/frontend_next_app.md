@@ -30,7 +30,9 @@ password: admin
 La UI incluye dos modos:
 
 * `Sandbox`: inventario inicial amplio para explorar combinaciones.
-* `Goal`: genera una meta aleatoria desde recetas reales. El selector de profundidad controla cuantas combinaciones tiene la ruta generada antes de llegar al objetivo.
+* `Goal`: genera una meta alcanzable desde recetas reales. El selector de profundidad controla cuantas combinaciones tiene el plan validado antes de llegar al objetivo. El inventario inicial se elige automaticamente desde presets curados de 2 a 4 elementos.
+
+Dentro de `Goal`, el panel derecho permite reiniciar la meta actual o generar una nueva sin volver al menu principal. Generar una nueva meta reemplaza el objetivo, resetea inventario/tablero/historial y carga el leaderboard del nuevo `goalId`.
 
 El juego tambien incluye `DPO test mode`. Cuando esta activo y una combinacion tiene dos o mas salidas candidatas reales, la UI muestra dos o tres opciones, usa la eleccion como resultado descubierto y guarda el evento en Postgres para entrenamiento futuro.
 
@@ -70,7 +72,8 @@ Para una prueba manual minima:
 4. Probar una combinacion conocida, por ejemplo `water` + `fire`.
 5. Probar una combinacion no conocida para validar el fallback mock.
 6. Cambiar entre `Sandbox` y `Goal`, elegir profundidad y revisar el leaderboard mock.
-7. Activar `DPO test mode`, combinar un par con alternativas reales y elegir una salida.
+7. En `Goal`, usar `Reset` para reiniciar la meta actual y `New goal` para generar otra meta desde cero.
+8. Activar `DPO test mode`, combinar un par con alternativas reales y elegir una salida.
 
 ## Integracion futura con SFT
 

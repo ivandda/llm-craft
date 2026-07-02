@@ -63,6 +63,10 @@ export type GoalPreset = {
     difficulty: string;
     status: "mock" | "generated";
     depth: number;
+    minDepth?: number;
+    seed?: string;
+    strategy?: string;
+    initialInventoryId?: string;
   };
   initialInventory: ElementToken[];
 };

@@ -74,24 +74,31 @@ export function AppShell() {
     setIsProfileOpen(false);
   }
 
+  async function generateNewGoal(): Promise<GoalPreset> {
+    setIsGeneratingGoal(true);
+    setGoalGenerationMessage(null);
+
+    try {
+      const nextGoal = await requestRandomGoal({ depth: goalDepth });
+      setActiveGoalPreset(nextGoal);
+      return nextGoal;
+    } catch {
+      setActiveGoalPreset(GOAL_PRESET);
+      setGoalGenerationMessage("Random goal unavailable. Using fallback goal.");
+      return GOAL_PRESET;
+    } finally {
+      setIsGeneratingGoal(false);
+    }
+  }
+
   async function handleSelectMode(mode: GameMode) {
     if (mode === "sandbox") {
       setSelectedMode("sandbox");
       return;
     }
 
-    setIsGeneratingGoal(true);
-    setGoalGenerationMessage(null);
-
-    try {
-      setActiveGoalPreset(await requestRandomGoal({ depth: goalDepth }));
-    } catch {
-      setActiveGoalPreset(GOAL_PRESET);
-      setGoalGenerationMessage("Random goal unavailable. Using fallback goal.");
-    } finally {
-      setIsGeneratingGoal(false);
-      setSelectedMode("goal");
-    }
+    await generateNewGoal();
+    setSelectedMode("goal");
   }
 
   if (isLoadingSession) {
@@ -133,9 +140,14 @@ export function AppShell() {
   return (
     <CraftGame
       goalPreset={activeGoalPreset}
+      goalDepth={goalDepth}
+      goalGenerationMessage={goalGenerationMessage}
+      isGeneratingGoal={isGeneratingGoal}
       mode={selectedMode}
       user={session.user}
       onBackToMenu={() => setSelectedMode(null)}
+      onGenerateNewGoal={generateNewGoal}
+      onGoalDepthChange={setGoalDepth}
       onLogout={handleLogout}
       onOpenProfile={(nextSnapshot) => {
         setSnapshot(nextSnapshot);

@@ -1,7 +1,8 @@
 # Postgres Dataset DB
 
-The local Postgres service stores the curated `final-10k` recipe dataset and the
-web app state for users, sessions, profiles, and leaderboards.
+The local Postgres service stores the curated `final-10k` recipe dataset
+`train`, `dev`, and `test` splits and the web app state for users, sessions,
+profiles, and leaderboards.
 
 ## Startup
 
@@ -44,6 +45,8 @@ The migration creates:
 
 The importer stores normalized relational fields and preserves each source row
 in `jsonb` columns (`raw_record`, `raw_candidate`, or `raw_manifest`).
+It imports only `train.jsonl`, `dev.jsonl`, and `test.jsonl`; `rejected.jsonl`
+is not loaded into Postgres.
 
 ## Web Behavior
 

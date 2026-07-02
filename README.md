@@ -17,8 +17,9 @@ uv sync
 
 ## Base de datos local
 
-La app web y el dataset curado `final-10k` usan Postgres local con Docker. Los
-datos persisten en `var/postgres-data/`, fuera de git.
+La app web y los splits `train`/`dev`/`test` del dataset curado `final-10k`
+usan Postgres local con Docker. Los datos persisten en `var/postgres-data/`,
+fuera de git.
 
 ```bash
 docker compose up -d postgres
@@ -409,7 +410,7 @@ RUN_SFT_SMOKE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run pytest tests/sft/test_sm
 
 ## Frontend
 
-La interfaz jugable vive en `apps/web` como una app Next.js preparada para conectar modelos más adelante mediante contratos mock tipados. Incluye registro/login mock con credenciales seeded `admin/admin`, menu de modos (`Sandbox` y `Goal`), metas aleatorias por profundidad, `DPO test mode`, perfil con logros destacados y leaderboard mock para objetivos completados.
+La interfaz jugable vive en `apps/web` como una app Next.js preparada para conectar modelos más adelante mediante contratos mock tipados. Incluye registro/login mock con credenciales seeded `admin/admin`, menu de modos (`Sandbox` y `Goal`), metas alcanzables por profundidad con inventario inicial variable, controles internos para reiniciar o generar otra meta en `Goal`, `DPO test mode`, perfil con logros destacados y leaderboard mock para objetivos completados.
 
 ```bash
 cd apps/web

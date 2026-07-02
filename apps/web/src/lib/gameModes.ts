@@ -16,7 +16,10 @@ export const GOAL_PRESET: GoalPreset = {
   metadata: {
     difficulty: "intro",
     status: "mock",
-    depth: 1
+    depth: 1,
+    minDepth: 1,
+    strategy: "fallback",
+    initialInventoryId: "growth"
   },
   initialInventory: GOAL_STARTERS
 };

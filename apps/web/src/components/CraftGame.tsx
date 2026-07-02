@@ -50,7 +50,12 @@ type CraftGameProps = {
   user: AuthUser;
   mode: GameMode;
   goalPreset?: GoalPreset;
+  goalDepth: number;
+  isGeneratingGoal: boolean;
+  goalGenerationMessage: string | null;
   onBackToMenu: () => void;
+  onGenerateNewGoal: () => Promise<GoalPreset>;
+  onGoalDepthChange: (depth: number) => void;
   onLogout: () => void;
   onOpenProfile: (snapshot: GameSnapshot) => void;
   onSnapshotChange?: (snapshot: GameSnapshot) => void;
@@ -101,7 +106,12 @@ export function CraftGame({
   user,
   mode,
   goalPreset,
+  goalDepth,
+  isGeneratingGoal,
+  goalGenerationMessage,
   onBackToMenu,
+  onGenerateNewGoal,
+  onGoalDepthChange,
   onLogout,
   onOpenProfile,
   onSnapshotChange
@@ -151,8 +161,7 @@ export function CraftGame({
 
   useEffect(() => {
     setHasHydratedStorage(false);
-    const shouldRestoreState =
-      mode !== "goal" || goalPreset?.metadata.status !== "generated";
+    const shouldRestoreState = mode !== "goal";
     const storedInventory = shouldRestoreState
       ? readStoredValue(storageKeys.inventory, initialInventory)
       : initialInventory;
@@ -174,7 +183,7 @@ export function CraftGame({
     setDragState(null);
     setGoalCompletion(null);
     setHasHydratedStorage(true);
-  }, [goalPreset?.metadata.status, initialInventory, mode, storageKeys]);
+  }, [goalPreset?.id, initialInventory, mode, storageKeys]);
 
   useEffect(() => {
     if (mode !== "goal" || !goalPreset) {
@@ -253,9 +262,9 @@ export function CraftGame({
     );
   }, [inventory, query]);
 
-  function resetGame() {
-    setInventory(initialInventory);
-    setBoardElements(createInitialBoard(initialInventory));
+  function resetGame(nextInitialInventory = initialInventory) {
+    setInventory(nextInitialInventory);
+    setBoardElements(createInitialBoard(nextInitialInventory));
     setHistory([]);
     setQuery("");
     setResult(null);
@@ -263,6 +272,11 @@ export function CraftGame({
     setDragState(null);
     setPendingDpoChoice(null);
     setGoalCompletion(null);
+  }
+
+  async function generateNewGoal() {
+    const nextGoal = await onGenerateNewGoal();
+    resetGame(nextGoal.initialInventory);
   }
 
   function clearSandboxWithSweep() {
@@ -369,7 +383,7 @@ export function CraftGame({
     try {
       await requestDpoPreference({
         mode,
-        goalId: goalPreset?.id,
+        goalId: mode === "goal" ? goalPreset?.id : undefined,
         inputA: pendingDpoChoice.firstInput,
         inputB: pendingDpoChoice.secondInput,
         shownOutputs: pendingDpoChoice.candidates,
@@ -764,25 +778,29 @@ export function CraftGame({
             >
               {isDarkMode ? <Sun size={16} /> : <Moon size={16} />}
             </button>
-            <button
-              aria-label="Clear sandbox"
-              className="grid size-9 place-items-center rounded-md border border-zinc-200 text-zinc-600 transition hover:bg-zinc-100 hover:text-zinc-950 disabled:cursor-not-allowed disabled:opacity-45 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-50"
-              disabled={boardElements.length === 0 || isSweeping}
-              onClick={clearSandboxWithSweep}
-              title="Clear sandbox"
-              type="button"
-            >
-              <Brush size={16} />
-            </button>
-            <button
-              aria-label="Reset"
-              className="grid size-9 place-items-center rounded-md border border-zinc-200 text-zinc-600 transition hover:bg-zinc-100 hover:text-zinc-950 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-50"
-              onClick={resetGame}
-              title="Reset"
-              type="button"
-            >
-              <RotateCcw size={16} />
-            </button>
+            {mode === "sandbox" ? (
+              <>
+                <button
+                  aria-label="Clear sandbox"
+                  className="grid size-9 place-items-center rounded-md border border-zinc-200 text-zinc-600 transition hover:bg-zinc-100 hover:text-zinc-950 disabled:cursor-not-allowed disabled:opacity-45 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-50"
+                  disabled={boardElements.length === 0 || isSweeping}
+                  onClick={clearSandboxWithSweep}
+                  title="Clear sandbox"
+                  type="button"
+                >
+                  <Brush size={16} />
+                </button>
+                <button
+                  aria-label="Reset"
+                  className="grid size-9 place-items-center rounded-md border border-zinc-200 text-zinc-600 transition hover:bg-zinc-100 hover:text-zinc-950 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-50"
+                  onClick={() => resetGame()}
+                  title="Reset"
+                  type="button"
+                >
+                  <RotateCcw size={16} />
+                </button>
+              </>
+            ) : null}
             <button
               aria-label="Log out"
               className="grid size-9 place-items-center rounded-md border border-zinc-200 text-zinc-600 transition hover:bg-zinc-100 hover:text-zinc-950 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-50"
@@ -793,26 +811,6 @@ export function CraftGame({
               <LogOut size={16} />
             </button>
           </div>
-
-          {mode === "goal" && goalPreset ? (
-            <div className="absolute left-4 top-24 z-30 max-w-sm rounded-md border border-emerald-200 bg-white/90 px-4 py-3 shadow-hairline backdrop-blur dark:border-emerald-900 dark:bg-zinc-950/85">
-              <div className="flex items-start gap-3">
-                <Target className="mt-0.5 shrink-0 text-emerald-600" size={18} />
-                <div>
-                  <h2 className="text-sm font-semibold">{goalPreset.title}</h2>
-                  <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-                    {goalPreset.objective}
-                  </p>
-                </div>
-              </div>
-            </div>
-          ) : null}
-
-          {mode === "goal" ? (
-            <div className="absolute bottom-4 left-4 z-30 w-[min(20rem,calc(100%-2rem))] rounded-md border border-zinc-200 bg-white/90 px-3 py-3 shadow-hairline backdrop-blur dark:border-zinc-700 dark:bg-zinc-950/85">
-              <LeaderboardPreview entries={leaderboard} />
-            </div>
-          ) : null}
 
           <div
             className="absolute inset-0 z-0"
@@ -861,6 +859,19 @@ export function CraftGame({
               : ""
           }`}
         >
+          {mode === "goal" && goalPreset ? (
+            <GoalSidePanel
+              goalDepth={goalDepth}
+              goalGenerationMessage={goalGenerationMessage}
+              goalPreset={goalPreset}
+              isGeneratingGoal={isGeneratingGoal}
+              leaderboard={leaderboard}
+              onGenerateNewGoal={generateNewGoal}
+              onGoalDepthChange={onGoalDepthChange}
+              onReset={() => resetGame()}
+            />
+          ) : null}
+
           <div className="mb-4">
             <div className="flex items-end justify-between gap-3">
               <div>
@@ -959,6 +970,116 @@ export function CraftGame({
         />
       ) : null}
     </main>
+  );
+}
+
+function GoalSidePanel({
+  goalDepth,
+  goalGenerationMessage,
+  goalPreset,
+  isGeneratingGoal,
+  leaderboard,
+  onGenerateNewGoal,
+  onGoalDepthChange,
+  onReset
+}: {
+  goalDepth: number;
+  goalGenerationMessage: string | null;
+  goalPreset: GoalPreset;
+  isGeneratingGoal: boolean;
+  leaderboard: LeaderboardEntry[];
+  onGenerateNewGoal: () => void | Promise<void>;
+  onGoalDepthChange: (depth: number) => void;
+  onReset: () => void;
+}) {
+  return (
+    <div className="mb-4 grid gap-3 rounded-md border border-emerald-200 bg-emerald-50 p-3 dark:border-emerald-900 dark:bg-emerald-950/30">
+      <div className="flex items-start gap-3">
+        <Target className="mt-0.5 shrink-0 text-emerald-700 dark:text-emerald-400" size={18} />
+        <div className="min-w-0">
+          <h2 className="truncate text-sm font-semibold">{goalPreset.title}</h2>
+          <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
+            {goalPreset.objective}
+          </p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <div className="rounded-md border border-emerald-200 bg-white px-3 py-2 dark:border-emerald-900 dark:bg-zinc-950">
+          <p className="text-xs text-zinc-500 dark:text-zinc-400">Depth</p>
+          <p className="mt-1 text-sm font-semibold">
+            {goalPreset.metadata.minDepth ?? goalPreset.metadata.depth}
+          </p>
+        </div>
+        <div className="rounded-md border border-emerald-200 bg-white px-3 py-2 dark:border-emerald-900 dark:bg-zinc-950">
+          <p className="text-xs text-zinc-500 dark:text-zinc-400">Start</p>
+          <p className="mt-1 truncate text-sm font-semibold capitalize">
+            {goalPreset.metadata.initialInventoryId ?? "fallback"}
+          </p>
+        </div>
+      </div>
+
+      <div>
+        <p className="mb-2 text-xs font-semibold text-zinc-500 dark:text-zinc-400">
+          Initial inventory
+        </p>
+        <div className="flex flex-wrap gap-1.5">
+          {goalPreset.initialInventory.map((element) => (
+            <span
+              className="max-w-full truncate rounded border border-emerald-200 bg-white px-2 py-1 text-xs capitalize dark:border-emerald-900 dark:bg-zinc-950"
+              key={element.id}
+            >
+              {formatElementName(element)}
+            </span>
+          ))}
+        </div>
+      </div>
+
+      <label className="grid gap-1 text-sm font-medium text-zinc-700 dark:text-zinc-200">
+        <span>Goal depth</span>
+        <select
+          className="h-9 rounded-md border border-emerald-200 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 disabled:cursor-wait disabled:opacity-60 dark:border-emerald-900 dark:bg-zinc-950"
+          disabled={isGeneratingGoal}
+          onChange={(event) => onGoalDepthChange(Number(event.target.value))}
+          value={goalDepth}
+        >
+          {Array.from({ length: 10 }, (_, index) => index + 1).map((value) => (
+            <option key={value} value={value}>
+              {value}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <div className="grid grid-cols-2 gap-2">
+        <button
+          className="flex h-10 items-center justify-center gap-2 rounded-md border border-emerald-200 bg-white px-3 text-sm font-semibold transition hover:bg-emerald-50 dark:border-emerald-900 dark:bg-zinc-950 dark:hover:bg-emerald-950/50"
+          disabled={isGeneratingGoal}
+          onClick={onReset}
+          type="button"
+        >
+          <RotateCcw size={15} />
+          Reset
+        </button>
+        <button
+          className="flex h-10 items-center justify-center gap-2 rounded-md bg-emerald-700 px-3 text-sm font-semibold text-white transition hover:bg-emerald-800 disabled:cursor-wait disabled:opacity-60"
+          disabled={isGeneratingGoal}
+          onClick={() => void onGenerateNewGoal()}
+          type="button"
+        >
+          <Target size={15} />
+          {isGeneratingGoal ? "Generating" : "New goal"}
+        </button>
+      </div>
+
+      {goalGenerationMessage ? (
+        <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
+          {goalGenerationMessage}
+        </p>
+      ) : null}
+
+      <LeaderboardPreview entries={leaderboard} />
+    </div>
   );
 }
 

@@ -20,10 +20,12 @@ import {
   saveLeaderboardEntry
 } from "@/lib/server/mockLeaderboard";
 import {
+  buildRandomGoalCandidate,
   buildRandomGoalFromRecipes,
   generateRandomGoal,
   isValidGoalDepth
 } from "@/lib/server/randomGoals";
+import type { GoalPathStep } from "@/lib/server/randomGoals";
 import { saveDpoPreference } from "@/lib/server/dpoPreferences";
 
 const dbMock = vi.hoisted(() => {
@@ -148,12 +150,12 @@ const dbMock = vi.hoisted(() => {
         user_id: userId,
         mode,
         goal_id: goalId,
-        input_a: inputA,
-        input_b: inputB,
-        shown_outputs: shownOutputs,
-        selected_output: selectedOutput,
-        rejected_outputs: rejectedOutputs,
-        inventory_snapshot: inventorySnapshot,
+        input_a: JSON.parse(inputA as string),
+        input_b: JSON.parse(inputB as string),
+        shown_outputs: JSON.parse(shownOutputs as unknown as string),
+        selected_output: JSON.parse(selectedOutput as string),
+        rejected_outputs: JSON.parse(rejectedOutputs as unknown as string),
+        inventory_snapshot: JSON.parse(inventorySnapshot as unknown as string),
         combination_index: combinationIndex,
         source,
         created_at: new Date("2026-06-29T00:00:00.000Z")
@@ -233,6 +235,23 @@ vi.mock("@/lib/server/db", () => ({
   query: dbMock.query,
   transaction: dbMock.transaction
 }));
+
+function replayGoalPath(
+  initialInventory: Array<{ id: string }>,
+  witnessPath: GoalPathStep[]
+): string | null {
+  const inventory = new Set(initialInventory.map((element) => element.id));
+  let target: string | null = null;
+
+  for (const step of witnessPath) {
+    expect(inventory.has(step.inputA)).toBe(true);
+    expect(inventory.has(step.inputB)).toBe(true);
+    inventory.add(step.output);
+    target = step.output;
+  }
+
+  return target;
+}
 
 describe("craft utilities", () => {
   beforeEach(() => {
@@ -343,8 +362,45 @@ describe("craft utilities", () => {
 
     expect(goal?.metadata.status).toBe("generated");
     expect(goal?.metadata.depth).toBe(3);
+    expect(goal?.metadata.minDepth).toBe(3);
+    expect(goal?.metadata.strategy).toBe("bfs-depth");
     expect(goal?.target.id).toBe("geyser");
     expect(goal?.initialInventory).toEqual(BASE_ELEMENTS);
+  });
+
+  it("builds a hidden witness path that reaches the goal", () => {
+    const candidate = buildRandomGoalCandidate(
+      [
+        { inputA: "water", inputB: "fire", output: "steam" },
+        { inputA: "earth", inputB: "water", output: "mud" },
+        { inputA: "steam", inputB: "mud", output: "geyser" }
+      ],
+      3,
+      () => 0
+    );
+
+    expect(candidate?.target.id).toBe("geyser");
+    expect(candidate?.minDepth).toBe(3);
+    expect(candidate?.witnessPath).toHaveLength(3);
+    expect(replayGoalPath(candidate?.initialInventory ?? [], candidate?.witnessPath ?? [])).toBe(
+      "geyser"
+    );
+    expect(candidate?.initialInventory.map((element) => element.id)).not.toContain(
+      candidate?.target.id
+    );
+  });
+
+  it("selects generated goals deterministically with a fixed seed", () => {
+    const recipes = [
+      { inputA: "water", inputB: "fire", output: "steam" },
+      { inputA: "earth", inputB: "water", output: "mud" },
+      { inputA: "earth", inputB: "fire", output: "lava" }
+    ];
+    const firstGoal = buildRandomGoalFromRecipes(recipes, 1, { seed: "fixed-seed" });
+    const secondGoal = buildRandomGoalFromRecipes(recipes, 1, { seed: "fixed-seed" });
+
+    expect(firstGoal?.id).toBe(secondGoal?.id);
+    expect(firstGoal?.target.id).toBe(secondGoal?.target.id);
   });
 
   it("rejects invalid random goal depths", () => {
