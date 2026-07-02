@@ -59,7 +59,11 @@ def infer_lora_target_modules(model: torch.nn.Module) -> list[str]:
     return ["q_proj", "v_proj"]
 
 
-def build_model_and_tokenizer(config: SFTConfig) -> tuple[torch.nn.Module, Any]:
+def build_model_and_tokenizer(
+    config: SFTConfig,
+    *,
+    apply_lora: bool = True,
+) -> tuple[torch.nn.Module, Any]:
     tokenizer = AutoTokenizer.from_pretrained(
         config.model_name_or_path,
         trust_remote_code=config.trust_remote_code,
@@ -90,6 +94,9 @@ def build_model_and_tokenizer(config: SFTConfig) -> tuple[torch.nn.Module, Any]:
         model.config.use_cache = False
     if config.load_in_4bit:
         model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=config.gradient_checkpointing)
+
+    if not apply_lora:
+        return model, tokenizer
 
     target_modules = (
         infer_lora_target_modules(model)

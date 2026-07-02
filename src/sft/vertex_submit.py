@@ -1,9 +1,8 @@
-"""Submit src/sft/train.py as a Vertex AI Custom Training Job.
+"""Submit an SFT Python module as a Vertex AI Custom Training Job.
 
 The training container reads data and writes outputs through the Cloud Storage
-FUSE mount that Vertex exposes at /gcs/<bucket>/, so train.py runs unchanged:
-inputs come from gs://<bucket>/datasets/... and the run dir lands under
-gs://<bucket>/runs/.
+FUSE mount that Vertex exposes at /gcs/<bucket>/. By default this launches
+src.sft.train, but other repo modules such as src.sft.eval_base can be run too.
 
 train.py is config-driven: it loads a YAML (--config) and accepts per-field
 overrides with underscored flags (--train_path, --model_name_or_path, ...).
@@ -21,10 +20,10 @@ from google.cloud import aiplatform
 PROJECT = "nlp2026-498021"
 REGION = "us-central1"
 BUCKET = "llm-craft-bucket"
-IMAGE_URI = (
-    f"{REGION}-docker.pkg.dev/{PROJECT}/llm-craft-registry/llm-craft-sft:latest"
-)
-GCS_ROOT = f"/gcs/{BUCKET}"
+
+
+def default_image_uri(region: str) -> str:
+    return f"{region}-docker.pkg.dev/{PROJECT}/llm-craft-registry/llm-craft-sft:latest"
 
 
 def default_run_name() -> str:
@@ -34,7 +33,14 @@ def default_run_name() -> str:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run-name", default=None, help="run_name label for the output dir.")
-    parser.add_argument("--image-uri", default=IMAGE_URI)
+    parser.add_argument("--region", default=REGION, help="Vertex AI region for the CustomJob.")
+    parser.add_argument("--bucket", default=BUCKET, help="Cloud Storage bucket mounted by Vertex at /gcs/<bucket>.")
+    parser.add_argument("--image-uri", default=None, help="Override the container image URI. Defaults to the registry in --region.")
+    parser.add_argument(
+        "--module",
+        default="src.sft.train",
+        help="Python module to run inside the Vertex container.",
+    )
     parser.add_argument("--machine-type", default="g2-standard-8")
     parser.add_argument("--accelerator-type", default="NVIDIA_L4")
     parser.add_argument(
@@ -52,10 +58,10 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--model-name", default=None, help="Override model_name_or_path.")
     parser.add_argument(
-        "--train-path", default=f"{GCS_ROOT}/datasets/final-10k/train.jsonl"
+        "--train-path", default=f"/gcs/{BUCKET}/datasets/final-10k/train.jsonl"
     )
     parser.add_argument(
-        "--dev-path", default=f"{GCS_ROOT}/datasets/final-10k/dev.jsonl"
+        "--dev-path", default=f"/gcs/{BUCKET}/datasets/final-10k/dev.jsonl"
     )
     parser.add_argument(
         "--max-steps",
@@ -71,21 +77,22 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def build_train_args(args: argparse.Namespace, run_name: str) -> list[str]:
-    train_args = [
+def build_module_args(args: argparse.Namespace, run_name: str) -> list[str]:
+    gcs_root = f"/gcs/{args.bucket}"
+    module_args = [
         "--config", args.config,
         "--train_path", args.train_path,
         "--dev_path", args.dev_path,
-        "--output_dir", f"{GCS_ROOT}/runs",
-        "--run_name", run_name,
     ]
+    if args.module == "src.sft.train":
+        module_args += ["--output_dir", f"{gcs_root}/runs", "--run_name", run_name]
     if args.model_name is not None:
-        train_args += ["--model_name_or_path", args.model_name]
+        module_args += ["--model_name_or_path", args.model_name]
     if args.max_steps is not None:
-        train_args += ["--max_steps", str(args.max_steps)]
+        module_args += ["--max_steps", str(args.max_steps)]
     # argparse.REMAINDER keeps a leading "--"; drop it before forwarding.
     extra = args.extra[1:] if args.extra and args.extra[0] == "--" else args.extra
-    return train_args + extra
+    return module_args + extra
 
 
 def job_resource_name(job: aiplatform.CustomJob) -> str | None:
@@ -101,9 +108,10 @@ def job_resource_name(job: aiplatform.CustomJob) -> str | None:
 def main() -> None:
     args = parse_args()
     run_name = args.run_name or default_run_name()
+    image_uri = args.image_uri or default_image_uri(args.region)
 
     aiplatform.init(
-        project=PROJECT, location=REGION, staging_bucket=f"gs://{BUCKET}"
+        project=PROJECT, location=args.region, staging_bucket=f"gs://{args.bucket}"
     )
 
     machine_spec: dict = {"machine_type": args.machine_type}
@@ -117,9 +125,9 @@ def main() -> None:
             "machine_spec": machine_spec,
             "replica_count": 1,
             "container_spec": {
-                "image_uri": args.image_uri,
-                "command": ["python", "-m", "src.sft.train"],
-                "args": build_train_args(args, run_name),
+                "image_uri": image_uri,
+                "command": ["python", "-m", args.module],
+                "args": build_module_args(args, run_name),
             },
         }
     ]
@@ -128,8 +136,12 @@ def main() -> None:
         display_name=run_name, worker_pool_specs=worker_pool_specs
     )
     print(f"Submitting Vertex CustomJob '{run_name}'")
-    print(f"  image:  {args.image_uri}")
-    print(f"  output: gs://{BUCKET}/runs/ (run dir created by train.py)")
+    print(f"  module: {args.module}")
+    print(f"  region: {args.region}")
+    print(f"  bucket: gs://{args.bucket}")
+    print(f"  image:  {image_uri}")
+    if args.module == "src.sft.train":
+        print(f"  output: gs://{args.bucket}/runs/ (run dir created by train.py)")
     try:
         job.run()
     except KeyboardInterrupt:

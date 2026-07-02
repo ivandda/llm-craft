@@ -12,7 +12,7 @@ num_train_epochs: 3
 max_steps: -1
 per_device_train_batch_size: 1
 per_device_eval_batch_size: 1
-gradient_accumulation_steps: 8
+gradient_accumulation_steps: 1
 learning_rate: 2.0e-4
 weight_decay: 0.0
 warmup_ratio: 0.03
@@ -33,7 +33,7 @@ lora_dropout: 0.05
 lora_target_modules: auto
 resume_from_checkpoint: null
 max_train_examples: null
-max_dev_examples: 500
+max_dev_examples: 1291
 length_normalize_concept_logprob: true
 weight_field: weight
 weight_fallback: inverse_rank
