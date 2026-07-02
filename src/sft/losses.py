@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import torch
 import torch.nn.functional as F
 
@@ -13,6 +15,34 @@ VALID_CANDIDATE_WEIGHTINGS = {"uniform", "dataset"}
 VALID_CANDIDATE_AGGREGATIONS = {"expected_logprob", "logsumexp_prob"}
 
 
+@dataclass(frozen=True)
+class SFTLossComponents:
+    total_loss: torch.Tensor
+    concept_loss: torch.Tensor
+    rationale_loss: torch.Tensor
+
+
+def causal_masked_logprobs(
+    logits: torch.Tensor,
+    input_ids: torch.Tensor,
+    mask: torch.Tensor,
+    *,
+    length_normalize: bool = False,
+) -> torch.Tensor:
+    shift_logits = logits[:, :-1, :]
+    shift_labels = input_ids[:, 1:]
+    shift_mask = mask[:, 1:].to(shift_logits.dtype)
+
+    log_probs = F.log_softmax(shift_logits, dim=-1)
+    token_log_probs = log_probs.gather(dim=-1, index=shift_labels.unsqueeze(-1)).squeeze(-1)
+    sequence_logprob = (token_log_probs * shift_mask).sum(dim=-1)
+
+    if length_normalize:
+        lengths = shift_mask.sum(dim=-1).clamp_min(1.0)
+        sequence_logprob = sequence_logprob / lengths
+    return sequence_logprob
+
+
 def causal_concept_logprobs(
     logits: torch.Tensor,
     input_ids: torch.Tensor,
@@ -20,18 +50,12 @@ def causal_concept_logprobs(
     *,
     length_normalize: bool = False,
 ) -> torch.Tensor:
-    shift_logits = logits[:, :-1, :]
-    shift_labels = input_ids[:, 1:]
-    shift_concept_mask = concept_mask[:, 1:].to(shift_logits.dtype)
-
-    log_probs = F.log_softmax(shift_logits, dim=-1)
-    token_log_probs = log_probs.gather(dim=-1, index=shift_labels.unsqueeze(-1)).squeeze(-1)
-    concept_logprob = (token_log_probs * shift_concept_mask).sum(dim=-1)
-
-    if length_normalize:
-        lengths = shift_concept_mask.sum(dim=-1).clamp_min(1.0)
-        concept_logprob = concept_logprob / lengths
-    return concept_logprob
+    return causal_masked_logprobs(
+        logits,
+        input_ids,
+        concept_mask,
+        length_normalize=length_normalize,
+    )
 
 
 def resolve_candidate_loss_config(
@@ -102,7 +126,7 @@ def sft_loss_from_logprobs(
     return torch.stack(losses).mean()
 
 
-def compute_sft_loss(
+def compute_sft_loss_components(
     logits: torch.Tensor,
     input_ids: torch.Tensor,
     concept_mask: torch.Tensor,
@@ -113,7 +137,10 @@ def compute_sft_loss(
     candidate_aggregation: str | None = None,
     loss_type: str | None = None,
     length_normalize: bool = False,
-) -> torch.Tensor:
+    rationale_mask: torch.Tensor | None = None,
+    rationale_loss_weight: float = 0.0,
+    length_normalize_rationale: bool = True,
+) -> SFTLossComponents:
     candidate_weighting, candidate_aggregation = resolve_candidate_loss_config(
         loss_type=loss_type,
         candidate_weighting=candidate_weighting,
@@ -125,13 +152,68 @@ def compute_sft_loss(
         concept_mask,
         length_normalize=length_normalize,
     )
-    return sft_loss_from_logprobs(
+    concept_loss = sft_loss_from_logprobs(
         concept_logprobs,
         group_ids,
         candidate_weights,
         candidate_weighting=candidate_weighting,
         candidate_aggregation=candidate_aggregation,
     )
+    rationale_loss = concept_loss.new_zeros(())
+    if rationale_mask is not None and rationale_loss_weight > 0:
+        shifted_rationale_mask = rationale_mask[:, 1:]
+        has_rationale = shifted_rationale_mask.any(dim=1)
+        if has_rationale.any():
+            rationale_logprobs = causal_masked_logprobs(
+                logits,
+                input_ids,
+                rationale_mask,
+                length_normalize=length_normalize_rationale,
+            )
+            rationale_loss = sft_loss_from_logprobs(
+                rationale_logprobs[has_rationale],
+                group_ids[has_rationale],
+                candidate_weights[has_rationale],
+                candidate_weighting=candidate_weighting,
+                candidate_aggregation=candidate_aggregation,
+            )
+    total_loss = concept_loss + rationale_loss_weight * rationale_loss
+    return SFTLossComponents(
+        total_loss=total_loss,
+        concept_loss=concept_loss,
+        rationale_loss=rationale_loss,
+    )
+
+
+def compute_sft_loss(
+    logits: torch.Tensor,
+    input_ids: torch.Tensor,
+    concept_mask: torch.Tensor,
+    group_ids: torch.Tensor,
+    candidate_weights: torch.Tensor,
+    *,
+    candidate_weighting: str | None = None,
+    candidate_aggregation: str | None = None,
+    loss_type: str | None = None,
+    length_normalize: bool = False,
+    rationale_mask: torch.Tensor | None = None,
+    rationale_loss_weight: float = 0.0,
+    length_normalize_rationale: bool = True,
+) -> torch.Tensor:
+    return compute_sft_loss_components(
+        logits,
+        input_ids,
+        concept_mask,
+        group_ids,
+        candidate_weights,
+        candidate_weighting=candidate_weighting,
+        candidate_aggregation=candidate_aggregation,
+        loss_type=loss_type,
+        length_normalize=length_normalize,
+        rationale_mask=rationale_mask,
+        rationale_loss_weight=rationale_loss_weight,
+        length_normalize_rationale=length_normalize_rationale,
+    ).total_loss
 
 
 def concept_set_loss_from_logprobs(

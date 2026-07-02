@@ -18,6 +18,8 @@ Cada fila JSONL debe incluir `input_a`, `input_b` y una lista `candidate_outputs
 ```
 
 También se aceptan filas legacy con `outputs` u `output`; se convierten internamente a candidatos.
+Si cada candidato trae `rationale`, la pipeline puede activar un término auxiliar de entrenamiento
+con `rationale_loss_weight > 0`.
 
 ## Pesos
 
@@ -60,6 +62,35 @@ Si tampoco se define `loss_type`, se usan los defaults de `SFTConfig`, por lo qu
 
 `length_normalize_concept_logprob` mantiene una variante experimental donde la log-probabilidad del concepto se divide por su longitud en tokens antes de agregarse por receta. El comportamiento principal sigue siendo la suma autoregresiva completa del concepto.
 
+### Término auxiliar de rationales
+
+Para el experimento M3, activar:
+
+```yaml
+rationale_loss_weight: 0.2
+length_normalize_rationale_logprob: true
+rationale_position: output_before_rationale
+```
+
+La loss total queda:
+
+```text
+total_loss = concept_loss + rationale_loss_weight * rationale_loss
+```
+
+`concept_loss` conserva exactamente el esquema multi-candidato configurado por
+`candidate_weighting` y `candidate_aggregation`. `rationale_loss` usa el mismo esquema, pero
+solo sobre los tokens del campo `rationale`. Si un candidato no tiene rationale, sigue aportando
+a `concept_loss` y no aporta al término auxiliar.
+
+`rationale_position` permite comparar dos órdenes autoregresivos sin cambiar el dataset ni la
+definición de la loss:
+
+```text
+output_before_rationale  # concepto primero, explicación después
+output_after_rationale   # explicación primero, concepto final después
+```
+
 ## Formato del prompt
 
 ```text
@@ -82,6 +113,59 @@ Return only the resulting concept.
 ```
 
 y el candidato supervisado se inserta como contenido del mensaje `assistant`. El span supervisado sigue siendo solo el concepto final, no los tokens estructurales del template ni trazas de razonamiento.
+
+Con `rationale_loss_weight > 0`, el texto supervisado agrega:
+
+```text
+Rationale: {rationale}
+```
+
+Con `rationale_position: output_before_rationale`, el ejemplo plain completo es:
+
+```text
+Input A: fire
+Input B: water
+Final concept: steam
+Rationale: Fire heats water until it becomes steam.
+```
+
+Con `rationale_position: output_after_rationale`, el ejemplo plain completo es:
+
+```text
+Input A: fire
+Input B: water
+Rationale: Fire heats water until it becomes steam.
+Final concept: steam
+```
+
+En `prompt_format: qwen_chat`, el mismo orden se aplica dentro del mensaje `assistant`:
+
+```text
+steam
+Rationale: Fire heats water until it becomes steam.
+```
+
+o bien:
+
+```text
+Rationale: Fire heats water until it becomes steam.
+Final concept: steam
+```
+
+El concepto final y el rationale tienen máscaras separadas, por lo que el peso auxiliar no cambia
+la definición de `concept_loss`.
+
+Comandos recomendados:
+
+```bash
+# Concepto y luego rationale
+uv run python -m src.sft.train \
+  --config configs/sft/qwen05b_10k_rationale_example.yaml
+
+# Rationale y luego concepto
+uv run python -m src.sft.train \
+  --config configs/sft/qwen05b_10k_rationale_first_example.yaml
+```
 
 ## Outputs
 

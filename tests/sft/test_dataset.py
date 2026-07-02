@@ -29,6 +29,32 @@ def test_load_recipe_jsonl_reads_candidate_outputs(tmp_path):
     assert [candidate.output for candidate in examples[0].candidates] == ["steam", "vapor"]
 
 
+def test_load_recipe_jsonl_preserves_candidate_rationales(tmp_path):
+    path = tmp_path / "recipes.jsonl"
+    path.write_text(
+        json.dumps(
+            {
+                "input_a": "fire",
+                "input_b": "water",
+                "candidate_outputs": [
+                    {
+                        "output": "steam",
+                        "source": "observed",
+                        "rank": 1,
+                        "rationale": "Fire heats water until it becomes steam.",
+                    }
+                ],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    examples = load_recipe_jsonl(path)
+
+    assert examples[0].candidates[0].rationale == "Fire heats water until it becomes steam."
+
+
 def test_normalize_candidate_weights_uniform():
     candidates = [Candidate(output="a", rank=1), Candidate(output="b", rank=9)]
 

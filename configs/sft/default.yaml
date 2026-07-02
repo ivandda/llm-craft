@@ -44,6 +44,11 @@ max_dev_examples: 4
 # Experimental: when true, divide each concept log-probability by its token
 # length before aggregating by recipe. The main formulation keeps this false.
 length_normalize_concept_logprob: false
+# Auxiliary rationale term. Keep 0.0 for concept-only SFT; set e.g. 0.2 to
+# train on candidate rationales when present in candidate_outputs.
+rationale_loss_weight: 0.0
+length_normalize_rationale_logprob: true
+rationale_position: output_before_rationale
 weight_field: weight
 weight_fallback: inverse_rank
 # Merge repeated (input_a, input_b) recipes, sum duplicate output mass, then

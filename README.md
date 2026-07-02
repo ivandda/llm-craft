@@ -262,6 +262,49 @@ uv run python -m src.sft.train \
   --candidate_aggregation logsumexp_prob
 ```
 
+#### 5. Concept-set ponderada + rationales
+
+Entrena el mismo objetivo de concepto y agrega un término auxiliar sobre el campo `rationale`
+de cada candidato. Los candidatos sin rationale siguen entrenando solo el concepto. Esta
+variante genera primero el concepto y luego la explicación:
+
+```text
+Input A: fire
+Input B: water
+Final concept: steam
+Rationale: Fire heats water until it becomes steam.
+```
+
+```bash
+uv run python -m src.sft.train \
+  --config configs/sft/qwen05b_10k_rationale_example.yaml
+```
+
+Para entrenar la variante en la que el rationale aparece antes y el concepto final queda
+condicionado por la explicación:
+
+```text
+Input A: fire
+Input B: water
+Rationale: Fire heats water until it becomes steam.
+Final concept: steam
+```
+
+usar:
+
+```bash
+uv run python -m src.sft.train \
+  --config configs/sft/qwen05b_10k_rationale_first_example.yaml
+```
+
+El término auxiliar queda controlado por:
+
+```text
+rationale_loss_weight = 0.2
+length_normalize_rationale_logprob = true
+rationale_position = output_before_rationale | output_after_rationale
+```
+
 Los mismos cuatro experimentos también pueden invocarse con aliases legacy de `loss_type`:
 
 ```bash

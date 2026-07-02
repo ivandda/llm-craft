@@ -55,6 +55,9 @@ class SFTConfig:
     max_train_examples: int | None = None
     max_dev_examples: int | None = None
     length_normalize_concept_logprob: bool = False
+    rationale_loss_weight: float = 0.0
+    length_normalize_rationale_logprob: bool = True
+    rationale_position: str = "output_before_rationale"
     weight_field: str = "weight"
     weight_fallback: str = "inverse_rank"
     merge_duplicate_recipes: bool = True
@@ -160,6 +163,10 @@ def validate_config(config: SFTConfig) -> None:
         raise ValueError("candidate_aggregation must be one of: expected_logprob, logsumexp_prob")
     if config.weight_fallback not in {"uniform", "inverse_rank"}:
         raise ValueError("weight_fallback must be one of: uniform, inverse_rank")
+    if config.rationale_loss_weight < 0:
+        raise ValueError("rationale_loss_weight must be >= 0")
+    if config.rationale_position not in {"output_before_rationale", "output_after_rationale"}:
+        raise ValueError("rationale_position must be one of: output_before_rationale, output_after_rationale")
     if config.gradient_accumulation_steps < 1:
         raise ValueError("gradient_accumulation_steps must be >= 1")
     if config.per_device_train_batch_size < 1 or config.per_device_eval_batch_size < 1:

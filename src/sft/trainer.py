@@ -14,7 +14,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 from src.sft.collator import SFTDataCollator
 from src.sft.config import SFTConfig
 from src.sft.dataset import RecipeSFTDataset
-from src.sft.losses import compute_sft_loss
+from src.sft.losses import SFTLossComponents, compute_sft_loss_components
 from src.sft.plotting import plot_losses
 from src.sft.utils import (
     append_jsonl,
@@ -134,12 +134,16 @@ def build_dataloaders(config: SFTConfig, tokenizer: Any) -> tuple[DataLoader, Da
         max_seq_length=config.max_seq_length,
         prompt_format=config.prompt_format,
         system_prompt=config.system_prompt,
+        include_rationale=config.rationale_loss_weight > 0,
+        rationale_position=config.rationale_position,
     )
     eval_collator = SFTDataCollator(
         tokenizer=tokenizer,
         max_seq_length=config.max_seq_length,
         prompt_format=config.prompt_format,
         system_prompt=config.system_prompt,
+        include_rationale=config.rationale_loss_weight > 0,
+        rationale_position=config.rationale_position,
     )
     # `per_device_*_batch_size` counts recipes. Each collated batch can expand to
     # more tokenized rows because every candidate for a recipe stays in the batch.
@@ -160,9 +164,13 @@ def build_dataloaders(config: SFTConfig, tokenizer: Any) -> tuple[DataLoader, Da
     return train_loader, dev_loader
 
 
-def batch_loss(model: torch.nn.Module, batch: dict[str, torch.Tensor], config: SFTConfig) -> torch.Tensor:
+def batch_loss_components(
+    model: torch.nn.Module,
+    batch: dict[str, torch.Tensor],
+    config: SFTConfig,
+) -> SFTLossComponents:
     outputs = model(input_ids=batch["input_ids"], attention_mask=batch["attention_mask"])
-    return compute_sft_loss(
+    return compute_sft_loss_components(
         outputs.logits,
         batch["input_ids"],
         batch["concept_mask"],
@@ -172,21 +180,47 @@ def batch_loss(model: torch.nn.Module, batch: dict[str, torch.Tensor], config: S
         candidate_aggregation=config.candidate_aggregation,
         loss_type=config.loss_type,
         length_normalize=config.length_normalize_concept_logprob,
+        rationale_mask=batch.get("rationale_mask"),
+        rationale_loss_weight=config.rationale_loss_weight,
+        length_normalize_rationale=config.length_normalize_rationale_logprob,
     )
+
+
+def batch_loss(model: torch.nn.Module, batch: dict[str, torch.Tensor], config: SFTConfig) -> torch.Tensor:
+    return batch_loss_components(model, batch, config).total_loss
+
+
+@torch.no_grad()
+def evaluate_components(
+    model: torch.nn.Module,
+    dev_loader: DataLoader,
+    config: SFTConfig,
+    accelerator: Accelerator,
+) -> dict[str, float]:
+    model.eval()
+    total_loss = torch.tensor(0.0, device=accelerator.device)
+    total_concept_loss = torch.tensor(0.0, device=accelerator.device)
+    total_rationale_loss = torch.tensor(0.0, device=accelerator.device)
+    total_groups = torch.tensor(0.0, device=accelerator.device)
+    for batch in dev_loader:
+        components = batch_loss_components(model, batch, config)
+        groups = torch.unique(batch["group_ids"]).numel()
+        total_loss += accelerator.gather_for_metrics(components.total_loss.detach() * groups).sum()
+        total_concept_loss += accelerator.gather_for_metrics(components.concept_loss.detach() * groups).sum()
+        total_rationale_loss += accelerator.gather_for_metrics(components.rationale_loss.detach() * groups).sum()
+        total_groups += accelerator.gather_for_metrics(torch.tensor(float(groups), device=accelerator.device)).sum()
+    model.train()
+    denom = total_groups.clamp_min(1.0)
+    return {
+        "loss": (total_loss / denom).item(),
+        "concept_loss": (total_concept_loss / denom).item(),
+        "rationale_loss": (total_rationale_loss / denom).item(),
+    }
 
 
 @torch.no_grad()
 def evaluate(model: torch.nn.Module, dev_loader: DataLoader, config: SFTConfig, accelerator: Accelerator) -> float:
-    model.eval()
-    total_loss = torch.tensor(0.0, device=accelerator.device)
-    total_groups = torch.tensor(0.0, device=accelerator.device)
-    for batch in dev_loader:
-        loss = batch_loss(model, batch, config)
-        groups = torch.unique(batch["group_ids"]).numel()
-        total_loss += accelerator.gather_for_metrics(loss.detach() * groups).sum()
-        total_groups += accelerator.gather_for_metrics(torch.tensor(float(groups), device=accelerator.device)).sum()
-    model.train()
-    return (total_loss / total_groups.clamp_min(1.0)).item()
+    return evaluate_components(model, dev_loader, config, accelerator)["loss"]
 
 
 def trainer_state(global_step: int, epoch: int, best_dev_loss: float | None, latest_checkpoint: str | None) -> dict[str, Any]:
@@ -288,6 +322,8 @@ def train(config: SFTConfig, run_dir: Path) -> dict[str, Any]:
     global_step, start_epoch, best_dev_loss = load_checkpoint_if_needed(accelerator, config)
     latest_checkpoint: str | None = config.resume_from_checkpoint
     running_loss = 0.0
+    running_concept_loss = 0.0
+    running_rationale_loss = 0.0
     running_count = 0
     train_start_time = time.perf_counter()
 
@@ -295,7 +331,8 @@ def train(config: SFTConfig, run_dir: Path) -> dict[str, Any]:
     for epoch in range(start_epoch, total_epochs):
         for batch in train_loader:
             with accelerator.accumulate(model):
-                loss = batch_loss(model, batch, config)
+                loss_components = batch_loss_components(model, batch, config)
+                loss = loss_components.total_loss
                 accelerator.backward(loss)
                 if accelerator.sync_gradients:
                     accelerator.clip_grad_norm_(model.parameters(), config.max_grad_norm)
@@ -304,21 +341,41 @@ def train(config: SFTConfig, run_dir: Path) -> dict[str, Any]:
                 optimizer.zero_grad()
 
             running_loss += loss.detach().float().item()
+            running_concept_loss += loss_components.concept_loss.detach().float().item()
+            running_rationale_loss += loss_components.rationale_loss.detach().float().item()
             running_count += 1
             if accelerator.sync_gradients:
                 global_step += 1
                 if config.logging_steps > 0 and global_step % config.logging_steps == 0:
                     avg_loss = running_loss / max(1, running_count)
+                    avg_concept_loss = running_concept_loss / max(1, running_count)
+                    avg_rationale_loss = running_rationale_loss / max(1, running_count)
                     running_loss = 0.0
+                    running_concept_loss = 0.0
+                    running_rationale_loss = 0.0
                     running_count = 0
                     elapsed_seconds = max(0.0, time.perf_counter() - train_start_time)
                     avg_step_seconds = elapsed_seconds / max(1, global_step)
                     remaining_steps = max(0, total_steps - global_step)
                     eta_seconds = avg_step_seconds * remaining_steps
                     record = {"step": global_step, "epoch": epoch, "loss": avg_loss}
+                    if config.rationale_loss_weight > 0:
+                        record.update(
+                            {
+                                "concept_loss": avg_concept_loss,
+                                "rationale_loss": avg_rationale_loss,
+                                "rationale_loss_weight": config.rationale_loss_weight,
+                            }
+                        )
                     if accelerator.is_main_process:
+                        loss_parts = f"train_loss={avg_loss:.4f}"
+                        if config.rationale_loss_weight > 0:
+                            loss_parts += (
+                                f" concept_loss={avg_concept_loss:.4f}"
+                                f" rationale_loss={avg_rationale_loss:.4f}"
+                            )
                         print(
-                            f"[sft] step={global_step} epoch={epoch} train_loss={avg_loss:.4f} "
+                            f"[sft] step={global_step} epoch={epoch} {loss_parts} "
                             f"elapsed={format_duration(elapsed_seconds)} "
                             f"eta={format_duration(eta_seconds)}",
                             flush=True,
@@ -335,11 +392,21 @@ def train(config: SFTConfig, run_dir: Path) -> dict[str, Any]:
                         )
 
                 if config.eval_steps > 0 and global_step % config.eval_steps == 0:
-                    dev_loss = evaluate(model, dev_loader, config, accelerator)
+                    dev_components = evaluate_components(model, dev_loader, config, accelerator)
+                    dev_loss = dev_components["loss"]
                     if accelerator.is_main_process:
                         print(f"[sft] step={global_step} epoch={epoch} dev_loss={dev_loss:.4f}", flush=True)
-                        append_jsonl(run_dir / "eval_losses.jsonl", {"step": global_step, "epoch": epoch, "loss": dev_loss})
-                        append_jsonl(run_dir / "metrics.jsonl", {"split": "dev", "step": global_step, "epoch": epoch, "loss": dev_loss})
+                        eval_record = {"step": global_step, "epoch": epoch, "loss": dev_loss}
+                        if config.rationale_loss_weight > 0:
+                            eval_record.update(
+                                {
+                                    "concept_loss": dev_components["concept_loss"],
+                                    "rationale_loss": dev_components["rationale_loss"],
+                                    "rationale_loss_weight": config.rationale_loss_weight,
+                                }
+                            )
+                        append_jsonl(run_dir / "eval_losses.jsonl", eval_record)
+                        append_jsonl(run_dir / "metrics.jsonl", {"split": "dev", **eval_record})
                     if best_dev_loss is None or dev_loss < best_dev_loss:
                         best_dev_loss = dev_loss
                         save_adapter(model, tokenizer, run_dir / "best_adapter", accelerator)
@@ -362,10 +429,20 @@ def train(config: SFTConfig, run_dir: Path) -> dict[str, Any]:
         if config.max_steps > 0 and global_step >= config.max_steps:
             break
 
-    final_dev_loss = evaluate(model, dev_loader, config, accelerator) if len(dev_loader) > 0 else None
+    final_dev_components = evaluate_components(model, dev_loader, config, accelerator) if len(dev_loader) > 0 else None
+    final_dev_loss = final_dev_components["loss"] if final_dev_components is not None else None
     if final_dev_loss is not None and accelerator.is_main_process:
-        append_jsonl(run_dir / "eval_losses.jsonl", {"step": global_step, "epoch": total_epochs, "loss": final_dev_loss})
-        append_jsonl(run_dir / "metrics.jsonl", {"split": "dev", "step": global_step, "epoch": total_epochs, "loss": final_dev_loss})
+        final_eval_record = {"step": global_step, "epoch": total_epochs, "loss": final_dev_loss}
+        if config.rationale_loss_weight > 0 and final_dev_components is not None:
+            final_eval_record.update(
+                {
+                    "concept_loss": final_dev_components["concept_loss"],
+                    "rationale_loss": final_dev_components["rationale_loss"],
+                    "rationale_loss_weight": config.rationale_loss_weight,
+                }
+            )
+        append_jsonl(run_dir / "eval_losses.jsonl", final_eval_record)
+        append_jsonl(run_dir / "metrics.jsonl", {"split": "dev", **final_eval_record})
     if final_dev_loss is not None and (best_dev_loss is None or final_dev_loss < best_dev_loss):
         best_dev_loss = final_dev_loss
         save_adapter(model, tokenizer, run_dir / "best_adapter", accelerator)
