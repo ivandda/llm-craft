@@ -1,8 +1,9 @@
-"""Submit an SFT Python module as a Vertex AI Custom Training Job.
+"""Submit a Python module as a Vertex AI Custom Training Job.
 
 The training container reads data and writes outputs through the Cloud Storage
 FUSE mount that Vertex exposes at /gcs/<bucket>/. By default this launches
-src.sft.train, but other repo modules such as src.sft.eval_base can be run too.
+src.sft.train, but other repo modules such as src.sft.eval_base and
+src.eval.run_sft_eval can be run too.
 
 train.py is config-driven: it loads a YAML (--config) and accepts per-field
 overrides with underscored flags (--train_path, --model_name_or_path, ...).
@@ -79,17 +80,19 @@ def parse_args() -> argparse.Namespace:
 
 def build_module_args(args: argparse.Namespace, run_name: str) -> list[str]:
     gcs_root = f"/gcs/{args.bucket}"
-    module_args = [
-        "--config", args.config,
-        "--train_path", args.train_path,
-        "--dev_path", args.dev_path,
-    ]
+    module_args: list[str] = []
     if args.module == "src.sft.train":
-        module_args += ["--output_dir", f"{gcs_root}/runs", "--run_name", run_name]
-    if args.model_name is not None:
-        module_args += ["--model_name_or_path", args.model_name]
-    if args.max_steps is not None:
-        module_args += ["--max_steps", str(args.max_steps)]
+        module_args += [
+            "--config", args.config,
+            "--train_path", args.train_path,
+            "--dev_path", args.dev_path,
+            "--output_dir", f"{gcs_root}/runs",
+            "--run_name", run_name,
+        ]
+        if args.model_name is not None:
+            module_args += ["--model_name_or_path", args.model_name]
+        if args.max_steps is not None:
+            module_args += ["--max_steps", str(args.max_steps)]
     # argparse.REMAINDER keeps a leading "--"; drop it before forwarding.
     extra = args.extra[1:] if args.extra and args.extra[0] == "--" else args.extra
     return module_args + extra
@@ -142,6 +145,8 @@ def main() -> None:
     print(f"  image:  {image_uri}")
     if args.module == "src.sft.train":
         print(f"  output: gs://{args.bucket}/runs/ (run dir created by train.py)")
+    else:
+        print("  args:   forwarded exactly from the extra '-- ...' section")
     try:
         job.run()
     except KeyboardInterrupt:

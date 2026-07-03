@@ -161,6 +161,55 @@ tests/sft/
 
 La guía técnica extendida está en [sft_qlora_pipeline.md](docs/codigo/sft_qlora_pipeline.md).
 
+## Evaluación generativa y creatividad
+
+El repositorio incluye un evaluador generativo para adapters SFT en `src/eval/run_sft_eval.py`. El script:
+
+* carga un `run_dir` de `runs/sft/`,
+* genera `K` respuestas por input,
+* y calcula una versión operacional del **Compositional Creativity Score (CCS)** del survey en `Survey_grupo_15.pdf`.
+
+La fórmula implementada sigue:
+
+```text
+C(x) = α * mean(q(x, y)^λ * n(x, y)) + (1 - α) * d(Y(x))
+```
+
+donde:
+
+* `q(x, y)` se calcula a partir de la **distancia coseno entre la muestra `y` y el embedding promedio de los candidatos conocidos** de esa receta. Se reporta la distancia y, para la fórmula, se usa `1 - distancia / 2` para mantener el score en `[0, 1]`.
+* `n(x, y)` se obtiene con un **LLM judge** servido desde Vertex AI usando un modelo partner no-Google. La implementación actual usa Anthropic Claude vía Vertex.
+* `d(Y(x))` parte de la distancia coseno promedio entre las `K` muestras generadas, y se transforma a score como `1 - distancia / 2`.
+
+Las embeddings para plausibilidad y diversidad ahora son configurables:
+
+* `--embedding_backend glove`
+* `--embedding_backend word2vec`
+* `--embedding_backend sentence_embeddings`
+
+Para `glove` y `word2vec`, el evaluador espera `--embedding_model_path` apuntando a un archivo de embeddings en texto plano. Para `sentence_embeddings`, usa `--sentence_embedding_model` y por default carga `sentence-transformers/all-MiniLM-L6-v2`.
+
+Ejemplo de uso sobre un adapter:
+
+```bash
+uv run --group vertex python -m src.eval.run_sft_eval \
+  --run_dir runs/sft/2026-06-28_1213_ce_uniform \
+  --eval_file datasets/final-10k/test.jsonl \
+  --max_examples 250 \
+  --num_samples 4 \
+  --embedding_backend sentence_embeddings \
+  --novelty_judge_model claude-3-5-sonnet-v2@20241022
+```
+
+`--max_examples` te deja limitar cuántas recetas del dataset se evalúan.
+
+Cuando `--novelty_method vertex_judge`, el script manda las `K` muestras de una receta en una sola llamada al judge. Así el costo escala aproximadamente con la cantidad de recetas evaluadas, no con `recetas x samples`.
+
+El script escribe:
+
+* `predictions.jsonl`: outputs por ejemplo, muestras y componentes de creatividad.
+* `summary.json`: por default solo métricas de creatividad (`plausibility_distance`, `plausibility_score`, `novelty`, `diversity_distance`, `diversity_score`, `ccs`) y las recetas con `local_creativity` mínima y máxima, junto con sus `sampled_outputs`.
+
 ### Smoke test local
 
 Con el `default.yaml` actual alcanza con:

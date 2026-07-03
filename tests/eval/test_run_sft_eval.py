@@ -1,9 +1,18 @@
 import sys
 
-from src.eval.run_sft_eval import build_output_record, parse_args, summarize_output_records
+from src.eval.run_sft_eval import (
+    apply_eval_precision_overrides,
+    build_output_record,
+    is_gcs_uri,
+    parse_args,
+    parse_gcs_uri,
+    prepare_output_dir,
+    summarize_creativity_extremes,
+)
+from src.sft.config import SFTConfig
 
 
-def test_build_output_record_includes_prediction_and_match_flags():
+def test_build_output_record_keeps_only_creativity_context_fields():
     eval_record = {
         "pair_id": "pair-1",
         "input_a": "fire",
@@ -21,44 +30,104 @@ def test_build_output_record_includes_prediction_and_match_flags():
         "prediction": "Mist",
         "canonical_output": "steam",
         "known_outputs": ["steam", "mist"],
-        "exact_canonical_match": False,
-        "known_output_match": True,
-        "is_empty_prediction": False,
-    }
-
-
-def test_summarize_output_records_counts_accuracy_and_empty_predictions():
-    records = [
-        {
-            "exact_canonical_match": True,
-            "known_output_match": True,
-            "is_empty_prediction": False,
-        },
-        {
-            "exact_canonical_match": False,
-            "known_output_match": True,
-            "is_empty_prediction": False,
-        },
-        {
-            "exact_canonical_match": False,
-            "known_output_match": False,
-            "is_empty_prediction": True,
-        },
-    ]
-
-    summary = summarize_output_records(records)
-
-    assert summary == {
-        "num_examples": 3,
-        "canonical_accuracy": 1 / 3,
-        "known_output_accuracy": 2 / 3,
-        "empty_predictions": 1,
     }
 
 
 def test_parse_args_defaults_to_dev_eval_set(monkeypatch):
-    monkeypatch.setattr(sys, "argv", ["run_sft_eval"])
+    monkeypatch.setattr(sys, "argv", ["run_sft_eval", "--run_dir", "runs/sft/example"])
 
     args = parse_args()
 
     assert args.eval_file == "datasets/processed/eval_dev_all.jsonl"
+
+
+def test_apply_eval_precision_overrides_updates_run_config_for_t4(monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_sft_eval",
+            "--run_dir",
+            "runs/sft/example",
+            "--eval_bf16",
+            "false",
+            "--eval_fp16",
+            "true",
+            "--eval_bnb_4bit_compute_dtype",
+            "float16",
+        ],
+    )
+
+    args = parse_args()
+    config = SFTConfig(bf16=True, fp16=False, bnb_4bit_compute_dtype="bfloat16")
+    updated = apply_eval_precision_overrides(config, args)
+
+    assert updated.bf16 is False
+    assert updated.fp16 is True
+    assert updated.bnb_4bit_compute_dtype == "float16"
+
+
+def test_parse_gcs_uri_extracts_bucket_and_blob_prefix():
+    assert is_gcs_uri("gs://llm-craft-bucket/runs/model-a") is True
+    assert parse_gcs_uri("gs://llm-craft-bucket/runs/model-a") == (
+        "llm-craft-bucket",
+        "runs/model-a",
+    )
+
+
+def test_prepare_output_dir_uses_local_staging_for_gcs_output(tmp_path):
+    output_dir, output_uri = prepare_output_dir(
+        "gs://llm-craft-bucket/eval_outputs/run-1",
+        tmp_path / "run_dir",
+        "test.jsonl",
+        tmp_path,
+    )
+
+    assert output_dir == tmp_path / "output"
+    assert output_uri == "gs://llm-craft-bucket/eval_outputs/run-1"
+
+
+def test_summarize_creativity_extremes_includes_min_and_max_records():
+    records = [
+        {
+            "pair_id": "pair-low",
+            "input_a": "fire",
+            "input_b": "stone",
+            "prediction": "ash",
+            "canonical_output": "lava",
+            "known_outputs": ["lava"],
+            "sampled_outputs": ["ash", "dust"],
+            "creativity": {
+                "plausibility_distance": 1.0,
+                "plausibility_score": 0.5,
+                "novelty": 0.2,
+                "diversity_distance": 0.4,
+                "diversity_score": 0.8,
+                "local_creativity": 0.18,
+            },
+        },
+        {
+            "pair_id": "pair-high",
+            "input_a": "water",
+            "input_b": "wind",
+            "prediction": "storm",
+            "canonical_output": "storm",
+            "known_outputs": ["storm", "mist"],
+            "sampled_outputs": ["storm", "tempest"],
+            "creativity": {
+                "plausibility_distance": 0.2,
+                "plausibility_score": 0.9,
+                "novelty": 0.8,
+                "diversity_distance": 0.3,
+                "diversity_score": 0.85,
+                "local_creativity": 0.74,
+            },
+        },
+    ]
+
+    summary = summarize_creativity_extremes(records)
+
+    assert summary["min_local_creativity_recipe"]["pair_id"] == "pair-low"
+    assert summary["min_local_creativity_recipe"]["sampled_outputs"] == ["ash", "dust"]
+    assert summary["max_local_creativity_recipe"]["pair_id"] == "pair-high"
+    assert summary["max_local_creativity_recipe"]["sampled_outputs"] == ["storm", "tempest"]

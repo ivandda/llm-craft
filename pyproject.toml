@@ -14,6 +14,7 @@ dependencies = [
     "pydantic>=2.13.0",
     "pyyaml>=6.0.0",
     "python-dotenv>=1.2.2",
+    "sentence-transformers>=3.0.1",
     "torch>=2.12.1",
     "transformers>=5.12.1",
 ]
@@ -32,7 +33,9 @@ agents = [
 # Opt-in group: only needed locally to submit Vertex jobs (src/sft/vertex_submit.py).
 # Not installed by default, so local training stays lean. Use: uv sync --group vertex
 vertex = [
+    "anthropic[vertex]>=0.72.0",
     "google-cloud-aiplatform>=1.71.0",
+    "google-cloud-storage>=2.18.2",
 ]
 
 [tool.uv]
