@@ -97,16 +97,6 @@ uv run python -m src.data.enrich_teacher \
 
 El LLM solo devuelve `keep_recipe`, `reject_reason` y `candidate_outputs`. El código agrega `rank`, `quality_status`, metadata, uso de tokens y costo estimado. Batch tiene descuento aproximado de 50%; el manifest de import escribe costo realtime y costo batch estimado.
 
-Smoke test real mínimo:
-```bash
-uv run python -m src.data.enrich_multi_output --splits train --limit 3
-```
-
-La generación completa queda como paso manual para controlar costo:
-```bash
-uv run python -m src.data.enrich_multi_output
-```
-
 ### 6. Rationales con Teacher (manual)
 Agrega una explicación breve a cada `candidate_output` del dataset multi-salida ya generado. No crea nuevas salidas: valida que el teacher mantenga exactamente los outputs existentes y escribe el resultado en `datasets/enriched/dataset_02_teacher_enriched_multi_output_with_rationale/`.
 
@@ -627,36 +617,3 @@ Para más detalles teóricos y de diseño, consulte:
 * [vertex_training.md](docs/codigo/vertex_training.md): Entrenar `src/sft/train.py` en Vertex AI con imagen propia en Artifact Registry y datos en GCS.
 * [frontend_next_app.md](docs/codigo/frontend_next_app.md): Guía para ejecutar, validar y extender la app Next.js jugable.
 * [destilacion_creatividad_composicional.md](docs/informe/destilacion_creatividad_composicional.md): Paper de diseño del proyecto de investigación.
-
-
----
-
-# Batch info:
-
-```bash
-(llm-craft) ➜  llm-craft git:(feature/enrich-dataset) ✗ uv run python -m src.data.enrich_teacher \
-  --mode batch-submit \
-  --batch-input-uri gs://llm-craft-nlp2026-498021/batch_input/batch_requests.jsonl \
-  --batch-output-uri gs://llm-craft-nlp2026-498021/batch_output/ \
-  --batch-display-name llm-craft-teacher-ranked-v2
-{
-  "name": "projects/486944883203/locations/us-central1/batchPredictionJobs/612764435819266048",
-  "display_name": "llm-craft-teacher-ranked-v2",
-  "state": "JOB_STATE_PENDING",
-  "create_time": "2026-06-27T20:06:18.146878Z",
-  "update_time": "2026-06-27T20:06:18.146878Z",
-  "model": "publishers/google/models/gemini-2.5-flash",
-  "src": {
-    "format": "jsonl",
-    "gcs_uri": [
-      "gs://llm-craft-nlp2026-498021/batch_input/batch_requests.jsonl"
-    ]
-  },
-  "dest": {
-    "format": "jsonl",
-    "gcs_uri": "gs://llm-craft-nlp2026-498021/batch_output/"
-  },
-  "is_terminal_state": false
-}
-(llm-craft) ➜  llm-craft git:(feature/enrich-dataset) ✗ 
-```
