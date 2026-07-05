@@ -20,16 +20,21 @@ COPY --from=ghcr.io/astral-sh/uv:0.11.21 /uv /usr/local/bin/uv
 WORKDIR /app
 
 # Install dependencies first (cached layer) using only the lock + manifest.
-# --no-default-groups drops dev + agents (langchain/google-genai stack), which the
-# SFT training entrypoint never imports, keeping the image small and the pull fast.
+# --no-default-groups drops dev + agents (langchain/google-genai stack).
+# We keep the `vertex` group because the same image is also used for
+# Vertex-evaluated modules such as src.eval.run_sft_eval, which import
+# anthropic[vertex] and google-cloud-storage at runtime.
 COPY pyproject.toml uv.lock .python-version ./
-RUN uv sync --frozen --no-default-groups --no-install-project
+RUN uv sync --frozen --no-default-groups --group vertex --no-install-project
 
 # Then add the source and finish installing the project itself.
 COPY src ./src
 COPY configs ./configs
 COPY README.md ./README.md
-RUN uv sync --frozen --no-default-groups
+RUN uv sync --frozen --no-default-groups --group vertex
+
+# Fail the image build early if the evaluation entrypoint is not importable.
+RUN /opt/venv/bin/python -m src.eval.run_sft_eval --help >/tmp/run_sft_eval_help.txt
 
 ENV PATH="/opt/venv/bin:${PATH}"
 

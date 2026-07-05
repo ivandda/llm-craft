@@ -41,6 +41,18 @@ def min_cosine_distances(sample_embeddings: torch.Tensor, reference_embeddings: 
     return cosine_distance_matrix(sample_embeddings, reference_embeddings).min(dim=1).values
 
 
+def normalized_min_cosine_distances(sample_embeddings: torch.Tensor, reference_embeddings: torch.Tensor) -> torch.Tensor:
+    return min_cosine_distances(sample_embeddings, reference_embeddings) / 2.0
+
+
+def normalized_mean_cosine_distances(sample_embeddings: torch.Tensor, reference_embeddings: torch.Tensor) -> torch.Tensor:
+    if sample_embeddings.shape[0] == 0:
+        raise ValueError("sample_embeddings must contain at least one row.")
+    if reference_embeddings.shape[0] == 0:
+        raise ValueError("reference_embeddings must contain at least one row.")
+    return cosine_distance_matrix(sample_embeddings, reference_embeddings).mean(dim=1) / 2.0
+
+
 def mean_reference_embedding(reference_embeddings: torch.Tensor) -> torch.Tensor:
     if reference_embeddings.shape[0] == 0:
         raise ValueError("reference_embeddings must contain at least one row.")

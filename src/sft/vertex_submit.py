@@ -131,6 +131,10 @@ def main() -> None:
                 "image_uri": image_uri,
                 "command": ["python", "-m", args.module],
                 "args": build_module_args(args, run_name),
+                "env": [
+                    {"name": "GOOGLE_CLOUD_PROJECT", "value": PROJECT},
+                    {"name": "GOOGLE_CLOUD_LOCATION", "value": args.region},
+                ],
             },
         }
     ]

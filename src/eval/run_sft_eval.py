@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import tempfile
 from collections import defaultdict
 from dataclasses import dataclass
@@ -13,9 +14,14 @@ import torch
 import yaml
 from peft import PeftModel
 
-from src.eval.creativity import CreativityComponents, compute_creativity_components, min_cosine_distances
+from src.eval.creativity import (
+    CreativityComponents,
+    compute_creativity_components,
+    normalized_mean_cosine_distances,
+    normalized_min_cosine_distances,
+)
 from src.eval.embeddings import BaseTextEmbedder, build_text_embedder
-from src.eval.vertex_judge import VertexAnthropicNoveltyJudge, load_vertex_environment
+from src.eval.vertex_judge import build_vertex_novelty_judge, load_vertex_environment, normalize_vertex_model_name
 from src.sft.collator import render_prefix, render_user_prompt
 from src.sft.config import SFTConfig
 from src.sft.trainer import build_model_and_tokenizer
@@ -62,9 +68,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--temperature", type=float, default=0.8)
     parser.add_argument("--top_p", type=float, default=0.95)
     parser.add_argument("--top_k", type=int, default=50)
+    parser.add_argument("--repetition_penalty", type=float, default=1.15)
+    parser.add_argument("--no_repeat_ngram_size", type=int, default=3)
+    parser.add_argument("--max_concept_words", type=int, default=3)
     parser.add_argument("--alpha", type=float, default=0.8)
     parser.add_argument("--lambda_penalty", type=float, default=2.0)
-    parser.add_argument("--novelty_method", choices=["vertex_judge", "embedding"], default="vertex_judge")
+    parser.add_argument(
+        "--novelty_method",
+        choices=["vertex_judge", "embedding", "input_distance"],
+        default="vertex_judge",
+    )
     parser.add_argument("--novelty_judge_model", default=None)
     parser.add_argument("--novelty_judge_region", default=None)
     parser.add_argument(
@@ -81,6 +94,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--sentence_embedding_model",
         default="sentence-transformers/all-MiniLM-L6-v2",
         help="SentenceTransformer model name or local path for embedding_backend=sentence_embeddings.",
+    )
+    parser.add_argument(
+        "--embedding_device",
+        default="cpu",
+        help="Device for the embedding backend. Recommended: cpu for sentence embeddings on Vertex eval jobs.",
     )
     parser.add_argument("--eval_bf16", type=_str_to_bool, default=None)
     parser.add_argument("--eval_fp16", type=_str_to_bool, default=None)
@@ -293,6 +311,24 @@ def decode_generated_text(
     return [text.strip() for text in decoded]
 
 
+def postprocess_generated_concept(text: str, *, max_words: int = 3) -> str:
+    cleaned = text.strip()
+    if not cleaned:
+        return ""
+    cleaned = cleaned.splitlines()[0].strip()
+    cleaned = re.split(r"[.:;?!\(\)\[\]\{\}]", cleaned, maxsplit=1)[0].strip()
+    cleaned = cleaned.replace("*", " ")
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    connector_match = re.search(r"\b(with|and|or|of|in|for|to|on|from|by)\b", cleaned, flags=re.IGNORECASE)
+    if connector_match is not None:
+        cleaned = cleaned[: connector_match.start()].strip()
+    cleaned = cleaned.strip(" ,-_")
+    words = [word.strip(" ,-_") for word in cleaned.split() if word.strip(" ,-_")]
+    if max_words > 0:
+        words = words[:max_words]
+    return " ".join(words)
+
+
 def build_output_record(eval_record: dict[str, Any], prediction: str) -> dict[str, Any]:
     return {
         "pair_id": eval_record["pair_id"],
@@ -394,6 +430,14 @@ def summarize_creativity_extremes(records: list[dict[str, Any]]) -> dict[str, An
 def maybe_move_to_device(model: torch.nn.Module, device_override: str | None) -> torch.nn.Module:
     if device_override is None:
         return model
+    if getattr(model, "is_loaded_in_4bit", False) or getattr(model, "is_loaded_in_8bit", False):
+        log_progress(
+            "Skipping explicit model.to(...) because the model is quantized and already managed by bitsandbytes/device_map"
+        )
+        return model
+    if getattr(model, "hf_device_map", None) is not None:
+        log_progress("Skipping explicit model.to(...) because the model already has an hf_device_map")
+        return model
     return model.to(torch.device(device_override))
 
 
@@ -413,7 +457,7 @@ def resolve_vertex_judge_model(args: argparse.Namespace) -> str:
         raise ValueError(
             "novelty_method='vertex_judge' requires --novelty_judge_model or VERTEX_NOVELTY_JUDGE_MODEL."
         )
-    return model
+    return normalize_vertex_model_name(model)
 
 
 def resolve_vertex_judge_region(args: argparse.Namespace) -> str:
@@ -425,12 +469,22 @@ def resolve_vertex_judge_region(args: argparse.Namespace) -> str:
     )
 
 
+def resolve_google_cloud_project() -> str | None:
+    return (
+        os.environ.get("GOOGLE_CLOUD_PROJECT")
+        or os.environ.get("GCLOUD_PROJECT")
+        or os.environ.get("GCP_PROJECT")
+        or os.environ.get("CLOUD_ML_PROJECT_ID")
+        or os.environ.get("AIP_PROJECT_NUMBER")
+    )
+
+
 def build_eval_embedder(args: argparse.Namespace) -> BaseTextEmbedder:
     return build_text_embedder(
         args.embedding_backend,
         word_vector_path=args.embedding_model_path,
         sentence_transformer_model=args.sentence_embedding_model,
-        device=args.device,
+        device=args.embedding_device,
     )
 
 
@@ -483,18 +537,23 @@ def main(argv: list[str] | None = None) -> None:
             f"Loaded {len(eval_records)} eval recipes and {len(train_reference_map)} train reference pairs"
         )
         log_progress(
-            f"Building embedder with backend={args.embedding_backend} model={args.sentence_embedding_model}"
+            "Building embedder "
+            f"with backend={args.embedding_backend} model={args.sentence_embedding_model} "
+            f"device={args.embedding_device}"
         )
         embedder = build_eval_embedder(args)
         novelty_judge = None
         if args.novelty_method == "vertex_judge":
-            project_id = os.environ.get("GOOGLE_CLOUD_PROJECT")
+            project_id = resolve_google_cloud_project()
             if not project_id:
-                raise RuntimeError("GOOGLE_CLOUD_PROJECT is not set in environment or .env file.")
+                raise RuntimeError(
+                    "No Google Cloud project was found in the environment. "
+                    "Set GOOGLE_CLOUD_PROJECT or run through src.sft.vertex_submit."
+                )
             log_progress(
                 f"Initializing Vertex novelty judge model={resolve_vertex_judge_model(args)} region={resolve_vertex_judge_region(args)}"
             )
-            novelty_judge = VertexAnthropicNoveltyJudge(
+            novelty_judge = build_vertex_novelty_judge(
                 project_id=project_id,
                 region=resolve_vertex_judge_region(args),
                 model=resolve_vertex_judge_model(args),
@@ -511,12 +570,17 @@ def main(argv: list[str] | None = None) -> None:
                 temperature=args.temperature,
                 top_p=args.top_p,
                 top_k=args.top_k,
+                repetition_penalty=args.repetition_penalty,
+                no_repeat_ngram_size=args.no_repeat_ngram_size,
                 max_new_tokens=args.max_new_tokens,
                 num_return_sequences=args.num_samples,
                 pad_token_id=tokenizer.pad_token_id,
                 eos_token_id=tokenizer.eos_token_id,
             )
             sampled_outputs = decode_generated_text(tokenizer, generation, encoded["input_ids"].shape[1])
+            sampled_outputs = [
+                postprocess_generated_concept(output, max_words=args.max_concept_words) for output in sampled_outputs
+            ]
             if not sampled_outputs:
                 sampled_outputs = [""]
 
@@ -536,13 +600,16 @@ def main(argv: list[str] | None = None) -> None:
                     [result.novelty_score for result in novelty_result.results],
                     dtype=torch.float32,
                 )
-            else:
+            elif args.novelty_method == "embedding":
                 if not train_outputs:
                     raise ValueError(
                         "novelty_method='embedding' requires at least one train reference for every evaluated pair."
                     )
                 train_output_embeddings = embedder.encode(train_outputs)
-                novelty_scores = min_cosine_distances(sample_embeddings, train_output_embeddings)
+                novelty_scores = normalized_min_cosine_distances(sample_embeddings, train_output_embeddings)
+            else:
+                input_embeddings = embedder.encode([record.input_a, record.input_b])
+                novelty_scores = normalized_mean_cosine_distances(sample_embeddings, input_embeddings)
 
             creativity = compute_creativity_components(
                 sample_embeddings,
@@ -564,13 +631,28 @@ def main(argv: list[str] | None = None) -> None:
                 "eval_file": args.eval_file,
                 "train_reference_file": train_reference_file_arg,
                 "num_samples": args.num_samples,
+                "max_new_tokens": args.max_new_tokens,
+                "temperature": args.temperature,
+                "top_p": args.top_p,
+                "top_k": args.top_k,
+                "repetition_penalty": args.repetition_penalty,
+                "no_repeat_ngram_size": args.no_repeat_ngram_size,
+                "max_concept_words": args.max_concept_words,
                 "alpha": args.alpha,
                 "lambda_penalty": args.lambda_penalty,
                 "novelty_method": args.novelty_method,
                 "novelty_judge_model": args.novelty_judge_model or os.environ.get("VERTEX_NOVELTY_JUDGE_MODEL"),
+                "novelty_embedding_definition": (
+                    "min_cosine_distance_to_train_references_divided_by_2"
+                    if args.novelty_method == "embedding"
+                    else "mean_cosine_distance_to_input_a_and_input_b_divided_by_2"
+                    if args.novelty_method == "input_distance"
+                    else None
+                ),
                 "embedding_backend": args.embedding_backend,
                 "embedding_model_path": args.embedding_model_path,
                 "sentence_embedding_model": args.sentence_embedding_model,
+                "embedding_device": args.embedding_device,
                 "eval_bf16": run_config.bf16,
                 "eval_fp16": run_config.fp16,
                 "eval_bnb_4bit_compute_dtype": run_config.bnb_4bit_compute_dtype,
