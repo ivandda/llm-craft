@@ -5,7 +5,6 @@ import json
 import os
 import re
 import tempfile
-from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -18,10 +17,9 @@ from src.eval.creativity import (
     CreativityComponents,
     compute_creativity_components,
     normalized_mean_cosine_distances,
-    normalized_min_cosine_distances,
 )
 from src.eval.embeddings import BaseTextEmbedder, build_text_embedder
-from src.eval.vertex_judge import build_vertex_novelty_judge, load_vertex_environment, normalize_vertex_model_name
+from src.eval.vertex_judge import load_vertex_environment
 from src.sft.collator import render_prefix, render_user_prompt
 from src.sft.config import SFTConfig
 from src.sft.trainer import build_model_and_tokenizer
@@ -56,11 +54,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Optional adapter directory. Defaults to best_adapter, then final_adapter inside run_dir.",
     )
     parser.add_argument("--eval_file", default="datasets/processed/eval_dev_all.jsonl")
-    parser.add_argument(
-        "--train_reference_file",
-        default=None,
-        help="Reference train set used for novelty. Defaults to the train_path from the run config.",
-    )
     parser.add_argument("--output_dir", default=None, help="Directory to write predictions and summary.")
     parser.add_argument("--max_examples", type=int, default=None)
     parser.add_argument("--num_samples", type=int, default=4)
@@ -73,13 +66,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--max_concept_words", type=int, default=3)
     parser.add_argument("--alpha", type=float, default=0.8)
     parser.add_argument("--lambda_penalty", type=float, default=2.0)
-    parser.add_argument(
-        "--novelty_method",
-        choices=["vertex_judge", "embedding", "input_distance"],
-        default="vertex_judge",
-    )
-    parser.add_argument("--novelty_judge_model", default=None)
-    parser.add_argument("--novelty_judge_region", default=None)
     parser.add_argument(
         "--embedding_backend",
         choices=["glove", "word2vec", "sentence_embeddings"],
@@ -252,29 +238,6 @@ def load_eval_records(path: str | Path, *, max_examples: int | None = None) -> l
             if max_examples is not None and len(records) >= max_examples:
                 break
     return records
-
-
-def build_train_reference_map(path: str | Path) -> dict[tuple[str, str], list[str]]:
-    reference_map: dict[tuple[str, str], list[str]] = defaultdict(list)
-    with Path(path).open("r", encoding="utf-8") as handle:
-        for line_number, line in enumerate(handle, start=1):
-            stripped = line.strip()
-            if not stripped:
-                continue
-            record = normalize_eval_record(json.loads(stripped), line_number)
-            reference_map[(record.input_a, record.input_b)].extend(record.known_outputs)
-    deduped: dict[tuple[str, str], list[str]] = {}
-    for pair, outputs in reference_map.items():
-        seen = set()
-        unique_outputs = []
-        for output in outputs:
-            normalized = output.strip().lower()
-            if normalized in seen:
-                continue
-            seen.add(normalized)
-            unique_outputs.append(output)
-        deduped[pair] = unique_outputs
-    return deduped
 
 
 def resolve_adapter_dir(run_dir: Path, adapter_dir: str | None) -> Path:
@@ -451,34 +414,6 @@ def apply_eval_precision_overrides(config: SFTConfig, args: argparse.Namespace) 
     return config
 
 
-def resolve_vertex_judge_model(args: argparse.Namespace) -> str:
-    model = args.novelty_judge_model or os.environ.get("VERTEX_NOVELTY_JUDGE_MODEL")
-    if not model:
-        raise ValueError(
-            "novelty_method='vertex_judge' requires --novelty_judge_model or VERTEX_NOVELTY_JUDGE_MODEL."
-        )
-    return normalize_vertex_model_name(model)
-
-
-def resolve_vertex_judge_region(args: argparse.Namespace) -> str:
-    return (
-        args.novelty_judge_region
-        or os.environ.get("VERTEX_NOVELTY_JUDGE_REGION")
-        or os.environ.get("GOOGLE_CLOUD_LOCATION")
-        or "us-east5"
-    )
-
-
-def resolve_google_cloud_project() -> str | None:
-    return (
-        os.environ.get("GOOGLE_CLOUD_PROJECT")
-        or os.environ.get("GCLOUD_PROJECT")
-        or os.environ.get("GCP_PROJECT")
-        or os.environ.get("CLOUD_ML_PROJECT_ID")
-        or os.environ.get("AIP_PROJECT_NUMBER")
-    )
-
-
 def build_eval_embedder(args: argparse.Namespace) -> BaseTextEmbedder:
     return build_text_embedder(
         args.embedding_backend,
@@ -496,7 +431,7 @@ def main(argv: list[str] | None = None) -> None:
     log_progress("Starting creativity evaluation pipeline")
     gcs_client = build_gcs_client() if any(
         is_gcs_uri(value)
-        for value in [args.run_dir, args.eval_file, args.train_reference_file or "", args.output_dir or ""]
+        for value in [args.run_dir, args.eval_file, args.output_dir or ""]
     ) else None
     if gcs_client is not None:
         log_progress("GCS mode enabled via gs:// paths")
@@ -510,17 +445,9 @@ def main(argv: list[str] | None = None) -> None:
         adapter_dir = resolve_adapter_dir(run_dir, args.adapter_dir)
         log_progress(f"Using adapter directory {adapter_dir}")
         eval_file = stage_input_file(args.eval_file, staging_root, gcs_client, "eval_file")
-        train_reference_file_arg = args.train_reference_file or run_config.train_path
-        train_reference_file = stage_input_file(
-            train_reference_file_arg,
-            staging_root,
-            gcs_client,
-            "train_reference_file",
-        )
         output_dir, output_uri = prepare_output_dir(args.output_dir, run_dir, str(eval_file), staging_root)
         output_dir.mkdir(parents=True, exist_ok=True)
         log_progress(f"Resolved eval file to {eval_file}")
-        log_progress(f"Resolved train reference file to {train_reference_file}")
         log_progress(f"Writing outputs to {output_uri or output_dir}")
 
         log_progress(f"Loading base model and tokenizer from {run_config.model_name_or_path}")
@@ -532,32 +459,13 @@ def main(argv: list[str] | None = None) -> None:
         log_progress(f"Model ready on device {next(model.parameters()).device}")
 
         eval_records = load_eval_records(eval_file, max_examples=args.max_examples)
-        train_reference_map = build_train_reference_map(train_reference_file)
-        log_progress(
-            f"Loaded {len(eval_records)} eval recipes and {len(train_reference_map)} train reference pairs"
-        )
+        log_progress(f"Loaded {len(eval_records)} eval recipes")
         log_progress(
             "Building embedder "
             f"with backend={args.embedding_backend} model={args.sentence_embedding_model} "
             f"device={args.embedding_device}"
         )
         embedder = build_eval_embedder(args)
-        novelty_judge = None
-        if args.novelty_method == "vertex_judge":
-            project_id = resolve_google_cloud_project()
-            if not project_id:
-                raise RuntimeError(
-                    "No Google Cloud project was found in the environment. "
-                    "Set GOOGLE_CLOUD_PROJECT or run through src.sft.vertex_submit."
-                )
-            log_progress(
-                f"Initializing Vertex novelty judge model={resolve_vertex_judge_model(args)} region={resolve_vertex_judge_region(args)}"
-            )
-            novelty_judge = build_vertex_novelty_judge(
-                project_id=project_id,
-                region=resolve_vertex_judge_region(args),
-                model=resolve_vertex_judge_model(args),
-            )
 
         prediction_records: list[dict[str, Any]] = []
         log_progress(f"Starting generation for {len(eval_records)} recipes with num_samples={args.num_samples}")
@@ -586,30 +494,8 @@ def main(argv: list[str] | None = None) -> None:
 
             sample_embeddings = embedder.encode(sampled_outputs)
             recipe_candidate_embeddings = embedder.encode(record.known_outputs)
-            train_outputs = train_reference_map.get((record.input_a, record.input_b), [])
-            if args.novelty_method == "vertex_judge":
-                assert novelty_judge is not None
-                novelty_result = novelty_judge.score_batch(
-                    input_a=record.input_a,
-                    input_b=record.input_b,
-                    generated_outputs=sampled_outputs,
-                    recipe_candidates=record.known_outputs,
-                    train_outputs=train_outputs,
-                )
-                novelty_scores = torch.tensor(
-                    [result.novelty_score for result in novelty_result.results],
-                    dtype=torch.float32,
-                )
-            elif args.novelty_method == "embedding":
-                if not train_outputs:
-                    raise ValueError(
-                        "novelty_method='embedding' requires at least one train reference for every evaluated pair."
-                    )
-                train_output_embeddings = embedder.encode(train_outputs)
-                novelty_scores = normalized_min_cosine_distances(sample_embeddings, train_output_embeddings)
-            else:
-                input_embeddings = embedder.encode([record.input_a, record.input_b])
-                novelty_scores = normalized_mean_cosine_distances(sample_embeddings, input_embeddings)
+            input_embeddings = embedder.encode([record.input_a, record.input_b])
+            novelty_scores = normalized_mean_cosine_distances(sample_embeddings, input_embeddings)
 
             creativity = compute_creativity_components(
                 sample_embeddings,
@@ -629,7 +515,6 @@ def main(argv: list[str] | None = None) -> None:
                 "run_dir": args.run_dir,
                 "adapter_dir": str(adapter_dir),
                 "eval_file": args.eval_file,
-                "train_reference_file": train_reference_file_arg,
                 "num_samples": args.num_samples,
                 "max_new_tokens": args.max_new_tokens,
                 "temperature": args.temperature,
@@ -640,15 +525,8 @@ def main(argv: list[str] | None = None) -> None:
                 "max_concept_words": args.max_concept_words,
                 "alpha": args.alpha,
                 "lambda_penalty": args.lambda_penalty,
-                "novelty_method": args.novelty_method,
-                "novelty_judge_model": args.novelty_judge_model or os.environ.get("VERTEX_NOVELTY_JUDGE_MODEL"),
-                "novelty_embedding_definition": (
-                    "min_cosine_distance_to_train_references_divided_by_2"
-                    if args.novelty_method == "embedding"
-                    else "mean_cosine_distance_to_input_a_and_input_b_divided_by_2"
-                    if args.novelty_method == "input_distance"
-                    else None
-                ),
+                "novelty_method": "input_distance",
+                "novelty_embedding_definition": "mean_cosine_distance_to_input_a_and_input_b_divided_by_2",
                 "embedding_backend": args.embedding_backend,
                 "embedding_model_path": args.embedding_model_path,
                 "sentence_embedding_model": args.sentence_embedding_model,
