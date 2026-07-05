@@ -178,10 +178,10 @@ C(x) = α * mean(q(x, y)^λ * n(x, y)) + (1 - α) * d(Y(x))
 donde:
 
 * `q(x, y)` se calcula a partir de la **distancia coseno entre la muestra `y` y el embedding promedio de los candidatos conocidos** de esa receta. Se reporta la distancia y, para la fórmula, se usa `1 - distancia / 2` para mantener el score en `[0, 1]`.
-* `n(x, y)` se obtiene con un **LLM judge** servido desde Vertex AI usando un modelo partner no-Google. La implementación actual usa Anthropic Claude vía Vertex.
+* `n(x, y)` se calcula como la **distancia coseno promedio entre el output y los dos inputs de la receta** (`input_a`, `input_b`), dividida por `2` para mantener el score en `[0, 1]`.
 * `d(Y(x))` parte de la distancia coseno promedio entre las `K` muestras generadas, y se transforma a score como `1 - distancia / 2`.
 
-Las embeddings para plausibilidad y diversidad ahora son configurables:
+Las embeddings para plausibilidad, novedad y diversidad son configurables:
 
 * `--embedding_backend glove`
 * `--embedding_backend word2vec`
@@ -197,18 +197,69 @@ uv run --group vertex python -m src.eval.run_sft_eval \
   --eval_file datasets/final-10k/test.jsonl \
   --max_examples 250 \
   --num_samples 4 \
+  --max_new_tokens 8 \
+  --temperature 0.6 \
+  --top_p 0.9 \
+  --top_k 40 \
+  --repetition_penalty 1.15 \
+  --no_repeat_ngram_size 3 \
+  --max_concept_words 3 \
   --embedding_backend sentence_embeddings \
-  --novelty_judge_model claude-3-5-sonnet-v2@20241022
+  --sentence_embedding_model sentence-transformers/all-MiniLM-L6-v2 \
+  --embedding_device cpu
 ```
 
 `--max_examples` te deja limitar cuántas recetas del dataset se evalúan.
-
-Cuando `--novelty_method vertex_judge`, el script manda las `K` muestras de una receta en una sola llamada al judge. Así el costo escala aproximadamente con la cantidad de recetas evaluadas, no con `recetas x samples`.
 
 El script escribe:
 
 * `predictions.jsonl`: outputs por ejemplo, muestras y componentes de creatividad.
 * `summary.json`: por default solo métricas de creatividad (`plausibility_distance`, `plausibility_score`, `novelty`, `diversity_distance`, `diversity_score`, `ccs`) y las recetas con `local_creativity` mínima y máxima, junto con sus `sampled_outputs`.
+
+### Build y ejecución en Vertex AI
+
+Build de la imagen:
+
+```bash
+gcloud builds submit . \
+  --tag us-central1-docker.pkg.dev/nlp2026-498021/llm-craft-registry/llm-craft-sft:eval-20260705-short-concepts-v2
+```
+
+Job de evaluación en Vertex AI sobre una L4:
+
+```bash
+uv run --group vertex python -m src.sft.vertex_submit \
+  --run-name qwen3-4b-eval-input-distance-l4-100-tight-v2 \
+  --region us-central1 \
+  --bucket llm-craft-bucket \
+  --image-uri us-central1-docker.pkg.dev/nlp2026-498021/llm-craft-registry/llm-craft-sft:eval-20260705-short-concepts-v2 \
+  --module src.eval.run_sft_eval \
+  --machine-type g2-standard-8 \
+  --accelerator-type NVIDIA_L4 \
+  --accelerator-count 1 \
+  -- \
+  --run_dir gs://llm-craft-bucket/runs/2026-07-01_1950_qwen3_4b_thinking_10k \
+  --eval_file gs://llm-craft-bucket/datasets/final-10k/test.jsonl \
+  --output_dir gs://llm-craft-bucket/eval_outputs/qwen3_4b_l4_eval_100_input_distance_tight_v2 \
+  --max_examples 100 \
+  --num_samples 4 \
+  --max_new_tokens 8 \
+  --temperature 0.6 \
+  --top_p 0.9 \
+  --top_k 40 \
+  --repetition_penalty 1.15 \
+  --no_repeat_ngram_size 3 \
+  --max_concept_words 3 \
+  --alpha 0.8 \
+  --lambda_penalty 2.0 \
+  --embedding_backend sentence_embeddings \
+  --sentence_embedding_model sentence-transformers/all-MiniLM-L6-v2 \
+  --embedding_device cpu \
+  --eval_bf16 true \
+  --eval_fp16 false \
+  --eval_bnb_4bit_compute_dtype bfloat16 \
+  --device cuda
+```
 
 ### Smoke test local
 

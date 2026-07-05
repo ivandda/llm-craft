@@ -10,7 +10,6 @@ from src.eval.run_sft_eval import (
     parse_gcs_uri,
     postprocess_generated_concept,
     prepare_output_dir,
-    resolve_google_cloud_project,
     summarize_creativity_extremes,
 )
 from src.sft.config import SFTConfig
@@ -44,34 +43,9 @@ def test_parse_args_defaults_to_dev_eval_set(monkeypatch):
 
     assert args.eval_file == "datasets/processed/eval_dev_all.jsonl"
     assert args.embedding_device == "cpu"
-    assert args.novelty_method == "vertex_judge"
     assert args.repetition_penalty == 1.15
     assert args.no_repeat_ngram_size == 3
     assert args.max_concept_words == 3
-
-
-def test_parse_args_accepts_embedding_novelty_mode(monkeypatch):
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        ["run_sft_eval", "--run_dir", "runs/sft/example", "--novelty_method", "embedding"],
-    )
-
-    args = parse_args()
-
-    assert args.novelty_method == "embedding"
-
-
-def test_parse_args_accepts_input_distance_novelty_mode(monkeypatch):
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        ["run_sft_eval", "--run_dir", "runs/sft/example", "--novelty_method", "input_distance"],
-    )
-
-    args = parse_args()
-
-    assert args.novelty_method == "input_distance"
 
 
 def test_apply_eval_precision_overrides_updates_run_config_for_t4(monkeypatch):
@@ -106,15 +80,6 @@ def test_parse_gcs_uri_extracts_bucket_and_blob_prefix():
         "llm-craft-bucket",
         "runs/model-a",
     )
-
-
-def test_resolve_google_cloud_project_checks_vertex_fallbacks(monkeypatch):
-    monkeypatch.delenv("GOOGLE_CLOUD_PROJECT", raising=False)
-    monkeypatch.delenv("GCLOUD_PROJECT", raising=False)
-    monkeypatch.delenv("GCP_PROJECT", raising=False)
-    monkeypatch.setenv("CLOUD_ML_PROJECT_ID", "486944883203")
-
-    assert resolve_google_cloud_project() == "486944883203"
 
 
 def test_prepare_output_dir_uses_local_staging_for_gcs_output(tmp_path):
