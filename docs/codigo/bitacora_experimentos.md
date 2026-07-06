@@ -38,6 +38,39 @@ Aclaraciones que suelen generar confusión:
   (las dos corridas previas al soporte de rationale ni siquiera tienen el campo; el
   default del código es `0.0`). La única corrida rationale-first quedó cancelada.
 
+### Thinking vs. rationale (y por qué importa acá)
+
+Son dos cosas distintas que es fácil confundir porque ambas son "texto extra"
+alrededor del concepto:
+
+- **Thinking (razonamiento del modelo base).** `Qwen3-4B-Thinking-2507` es un modelo
+  de razonamiento: por defecto genera una cadena de pensamiento entre `<think>…</think>`
+  antes de la respuesta. Es un **comportamiento del checkpoint base**, no viene de
+  nuestros datos, es largo y libre, y **no lo supervisamos**. En nuestra tarea no lo
+  queremos en la salida (pedimos un concepto de ≤2 palabras).
+- **Rationale (dato nuestro).** Es una explicación breve que el *teacher* (Gemini)
+  generó para cada `candidate_output` (p.ej. *"fire heats water, producing steam"*).
+  Vive en el dataset (`candidate_outputs[].rationale`) y **se puede enseñar
+  explícitamente** como término auxiliar de loss (`rationale_loss_weight`). Es corto,
+  estructurado, opcional, y ninguno de los 4 modelos lo usó.
+
+Resumen: *thinking* = razonamiento libre del modelo base (no supervisado, formato
+largo); *rationale* = texto corto y curado de nuestros datos que podríamos entrenar.
+Son ejes independientes: usar el checkpoint "Thinking" **no** implica "entrenado para
+razonar/justificar".
+
+Por qué importa para este trabajo:
+
+1. **Evaluación justa.** Los 4 modelos SFT responden directo (se los supervisó solo
+   sobre el concepto). Si el modelo base razona (thinking) y los SFT no, hay que
+   comparar únicamente la **respuesta final** — por eso `run_sft_eval.py` agrega
+   `--no_adapter` para el baseline base y `--enable_thinking`/`--strip_think` para
+   aislar/quitar el `<think>`.
+2. **Métrica y brevedad.** La tarea apunta a ≤2 palabras; si thinking o rationale se
+   filtran en la salida, rompen el exact-match de cobertura y la meta de concisión.
+3. **Diseño experimental.** "Entrenar con rationale" es una palanca futura (la variante
+   rationale-first, hoy cancelada), no algo que ya esté en estos 4 modelos.
+
 ## La matriz de losses (2×2)
 
 La familia de losses se parametriza por `candidate_weighting × candidate_aggregation`.

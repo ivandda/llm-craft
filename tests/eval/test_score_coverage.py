@@ -1,4 +1,14 @@
-from src.eval.score_coverage import score_records
+import numpy as np
+
+from src.eval.score_coverage import format_comparison, score_records, semantic_coverage
+
+
+class FakeEmbedder:
+    def __init__(self, table):
+        self.table = table
+
+    def encode(self, texts):
+        return np.array([self.table[text] for text in texts], dtype=float)
 
 
 def _record(sampled_outputs, known_outputs, canonical_output):
@@ -60,3 +70,42 @@ def test_score_records_falls_back_to_prediction_when_no_samples():
 
 def test_score_records_empty_input():
     assert score_records([])["n"] == 0
+
+
+def test_semantic_coverage_credits_near_matches():
+    embedder = FakeEmbedder(
+        {
+            "steam": [1.0, 0.0],
+            "vapor": [0.98, 0.20],  # ~0.98 cosine to steam -> counts at 0.9
+            "banana": [0.0, 1.0],  # orthogonal -> does not count
+        }
+    )
+    records = [
+        _record(["vapor"], ["steam"], "steam"),
+        _record(["banana"], ["steam"], "steam"),
+    ]
+
+    scores = semantic_coverage(records, embedder, threshold=0.9)
+
+    assert scores["top1_semantic_match"] == 0.5
+    assert scores["anyk_semantic_match"] == 0.5
+    assert scores["semantic_threshold"] == 0.9
+
+
+def test_format_comparison_omits_semantic_columns_by_default():
+    labeled = [("m", score_records([_record(["steam"], ["steam"], "steam")]))]
+
+    out = format_comparison(labeled)
+
+    assert "top1_known" in out
+    assert "top1_sem" not in out
+
+
+def test_format_comparison_includes_semantic_columns_when_present():
+    scores = score_records([_record(["steam"], ["steam"], "steam")])
+    scores.update({"top1_semantic_match": 0.75, "anyk_semantic_match": 0.9, "semantic_threshold": 0.7})
+
+    out = format_comparison([("m", scores)])
+
+    assert "top1_sem" in out
+    assert "any@k_sem" in out
