@@ -50,6 +50,13 @@ def parse_args() -> argparse.Namespace:
         default=1,
         help="Set 0 for a CPU-only machine (e.g. smoke tests without GPU quota).",
     )
+    parser.add_argument(
+        "--boot-disk-gb",
+        type=int,
+        default=200,
+        help="Worker boot disk size in GB. The Vertex default (100) can run low when the base model download plus staged run_dir share the disk.",
+    )
+    parser.add_argument("--boot-disk-type", default="pd-ssd")
 
     # train.py passthrough. Paths default to the GCS FUSE mount.
     parser.add_argument(
@@ -127,6 +134,10 @@ def main() -> None:
         {
             "machine_spec": machine_spec,
             "replica_count": 1,
+            "disk_spec": {
+                "boot_disk_type": args.boot_disk_type,
+                "boot_disk_size_gb": args.boot_disk_gb,
+            },
             "container_spec": {
                 "image_uri": image_uri,
                 "command": ["python", "-m", args.module],
