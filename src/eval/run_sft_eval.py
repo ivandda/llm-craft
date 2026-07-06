@@ -90,6 +90,23 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--eval_fp16", type=_str_to_bool, default=None)
     parser.add_argument("--eval_bnb_4bit_compute_dtype", default=None)
     parser.add_argument("--device", default=None, help="Override device, e.g. cpu or cuda.")
+    parser.add_argument(
+        "--no_adapter",
+        action="store_true",
+        help="Evaluate the base model without a LoRA adapter (baseline). Still reads run_dir/config.yaml for the generation setup.",
+    )
+    parser.add_argument(
+        "--enable_thinking",
+        type=_str_to_bool,
+        default=None,
+        help="qwen_chat only: value passed to the chat template's enable_thinking. Default None keeps the template default.",
+    )
+    parser.add_argument(
+        "--strip_think",
+        type=_str_to_bool,
+        default=False,
+        help="Drop any <think>...</think> reasoning block from generations before extracting the concept.",
+    )
     return parser.parse_args(argv)
 
 
@@ -255,14 +272,36 @@ def resolve_output_dir(run_dir: Path, eval_file: Path, output_dir: str | None) -
     return run_dir / "eval" / eval_file.stem
 
 
-def render_generation_prompt(record: EvalRecord, config: SFTConfig, tokenizer: Any) -> str:
+def render_generation_prompt(
+    record: EvalRecord,
+    config: SFTConfig,
+    tokenizer: Any,
+    *,
+    enable_thinking: bool | None = None,
+) -> str:
     if config.prompt_format == "qwen_chat":
         messages = []
         if config.system_prompt:
             messages.append({"role": "system", "content": config.system_prompt})
         messages.append({"role": "user", "content": render_user_prompt(record.input_a, record.input_b)})
-        return tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        template_kwargs: dict[str, Any] = {}
+        if enable_thinking is not None:
+            template_kwargs["enable_thinking"] = enable_thinking
+        return tokenizer.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True, **template_kwargs
+        )
     return render_prefix(record.input_a, record.input_b)
+
+
+def strip_think_block(text: str) -> str:
+    close = "</think>"
+    if close in text:
+        return text.split(close, 1)[-1]
+    if "<think>" in text:
+        # Reasoning was opened but never closed (e.g. truncated by max_new_tokens):
+        # there is no usable final answer.
+        return ""
+    return text
 
 
 def decode_generated_text(
@@ -442,8 +481,12 @@ def main(argv: list[str] | None = None) -> None:
         log_progress(f"Using run directory {run_dir}")
         run_config = SFTConfig(**load_yaml(run_dir / "config.yaml"))
         run_config = apply_eval_precision_overrides(run_config, args)
-        adapter_dir = resolve_adapter_dir(run_dir, args.adapter_dir)
-        log_progress(f"Using adapter directory {adapter_dir}")
+        if args.no_adapter:
+            adapter_dir = None
+            log_progress("Base-model baseline: skipping adapter (--no_adapter)")
+        else:
+            adapter_dir = resolve_adapter_dir(run_dir, args.adapter_dir)
+            log_progress(f"Using adapter directory {adapter_dir}")
         eval_file = stage_input_file(args.eval_file, staging_root, gcs_client, "eval_file")
         output_dir, output_uri = prepare_output_dir(args.output_dir, run_dir, str(eval_file), staging_root)
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -452,8 +495,9 @@ def main(argv: list[str] | None = None) -> None:
 
         log_progress(f"Loading base model and tokenizer from {run_config.model_name_or_path}")
         model, tokenizer = build_model_and_tokenizer(run_config, apply_lora=False)
-        log_progress("Loading PEFT adapter")
-        model = PeftModel.from_pretrained(model, adapter_dir)
+        if adapter_dir is not None:
+            log_progress("Loading PEFT adapter")
+            model = PeftModel.from_pretrained(model, adapter_dir)
         model = maybe_move_to_device(model, args.device)
         model.eval()
         log_progress(f"Model ready on device {next(model.parameters()).device}")
@@ -470,7 +514,7 @@ def main(argv: list[str] | None = None) -> None:
         prediction_records: list[dict[str, Any]] = []
         log_progress(f"Starting generation for {len(eval_records)} recipes with num_samples={args.num_samples}")
         for index, record in enumerate(eval_records, start=1):
-            prompt = render_generation_prompt(record, run_config, tokenizer)
+            prompt = render_generation_prompt(record, run_config, tokenizer, enable_thinking=args.enable_thinking)
             encoded = tokenizer(prompt, return_tensors="pt").to(next(model.parameters()).device)
             generation = model.generate(
                 **encoded,
@@ -486,6 +530,8 @@ def main(argv: list[str] | None = None) -> None:
                 eos_token_id=tokenizer.eos_token_id,
             )
             sampled_outputs = decode_generated_text(tokenizer, generation, encoded["input_ids"].shape[1])
+            if args.strip_think:
+                sampled_outputs = [strip_think_block(output) for output in sampled_outputs]
             sampled_outputs = [
                 postprocess_generated_concept(output, max_words=args.max_concept_words) for output in sampled_outputs
             ]
@@ -513,7 +559,10 @@ def main(argv: list[str] | None = None) -> None:
         summary.update(
             {
                 "run_dir": args.run_dir,
-                "adapter_dir": str(adapter_dir),
+                "adapter_dir": str(adapter_dir) if adapter_dir is not None else "none (base model)",
+                "no_adapter": args.no_adapter,
+                "enable_thinking": args.enable_thinking,
+                "strip_think": args.strip_think,
                 "eval_file": args.eval_file,
                 "num_samples": args.num_samples,
                 "max_new_tokens": args.max_new_tokens,

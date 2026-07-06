@@ -10,6 +10,7 @@ from src.eval.run_sft_eval import (
     parse_gcs_uri,
     postprocess_generated_concept,
     prepare_output_dir,
+    strip_think_block,
     summarize_creativity_extremes,
 )
 from src.sft.config import SFTConfig
@@ -116,6 +117,52 @@ def test_postprocess_generated_concept_stops_before_connector_phrase():
     result = postprocess_generated_concept(output)
 
     assert result == "clockwork watch"
+
+
+def test_parse_args_base_baseline_flags_default_off(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["run_sft_eval", "--run_dir", "runs/sft/example"])
+
+    args = parse_args()
+
+    assert args.no_adapter is False
+    assert args.enable_thinking is None
+    assert args.strip_think is False
+
+
+def test_parse_args_accepts_base_baseline_flags(monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_sft_eval",
+            "--run_dir",
+            "runs/sft/example",
+            "--no_adapter",
+            "--enable_thinking",
+            "false",
+            "--strip_think",
+            "true",
+        ],
+    )
+
+    args = parse_args()
+
+    assert args.no_adapter is True
+    assert args.enable_thinking is False
+    assert args.strip_think is True
+
+
+def test_strip_think_block_removes_closed_reasoning():
+    assert strip_think_block("<think>\nreasoning here\n</think>\nsteam").strip() == "steam"
+
+
+def test_strip_think_block_drops_unclosed_reasoning():
+    # Truncated by max_new_tokens: opened <think> but never reached the answer.
+    assert strip_think_block("<think>\nlong reasoning that never finished") == ""
+
+
+def test_strip_think_block_passes_through_plain_text():
+    assert strip_think_block("ice cream") == "ice cream"
 
 
 def test_summarize_creativity_extremes_includes_min_and_max_records():
