@@ -190,6 +190,56 @@ Limitación y su resolución:
   desde el trainer) y usar tags inmutables (`:$(git rev-parse --short HEAD)`, ya
   soportado por `cloudbuild.yaml`), para no tener que reconstruir esto a mano nunca más.
 
+## Prompt del student (train/eval) vs. prompt del teacher
+
+Son dos prompts distintos con roles distintos; no tienen por qué coincidir.
+
+- **Prompt del teacher (complejo).** Vive en `enrich_teacher.py`. Se le manda a Gemini
+  para *generar los datos*: dado un par, producir hasta 5 outputs plausibles,
+  rankearlos, escribir rationales, rechazar los malos. Da forma al **contenido** del
+  dataset (cuáles son las etiquetas), no al formato con que se prompea al student.
+- **Prompt del student (simple).** `render_user_prompt` en `collator.py`. Es lo que el
+  modelo chico (Qwen) ve en entrenamiento y evaluación. Da forma al **formato** de la
+  tarea. Texto exacto:
+  - system: `You combine two concepts into one resulting concept.`
+  - user:
+    ```
+    Given two concepts, combine them into one resulting concept.
+
+    Concept A: {input_a}
+    Concept B: {input_b}
+
+    Return only the resulting concept.
+    ```
+
+Regla dura: el prompt de **train y eval del student deben ser idénticos**. Las 4
+corridas se entrenaron con el prompt simple, así que la evaluación **debe** usar el
+mismo. Cambiar el prompt del student no es un ajuste de config: **requiere reentrenar**.
+Rediseñarlo (instrucciones más fuertes, few-shot, límite de palabras explícito) es un
+experimento futuro con su propio reentrenamiento, no una palanca de esta ronda. El
+prompt del teacher es independiente y puede seguir siendo complejo.
+
+## Baseline base: manejo del thinking (smoke 2026-07-06)
+
+`Qwen3-4B-Thinking-2507` es un modelo de razonamiento cuyo chat template **inyecta
+siempre `<think>`** al final del prompt de generación (`add_generation_prompt=True`) e
+**ignora `enable_thinking=False`** (verificado: el prompt renderizado es idéntico con y
+sin la flag). Los modelos SFT aprendieron a saltarse ese bloque y responder directo; el
+modelo base **sí** razona.
+
+Hallazgos de las smoke runs (`--no_adapter`, 20 recetas del test):
+
+- `--enable_thinking false` → no sirve (el template lo ignora).
+- `--strip_think` con `max_new_tokens=200` → el base razona pero **no cierra `</think>`
+  dentro del presupuesto**; salen fragmentos de razonamiento (p.ej. *"Okay the user
+  wants"*), no un concepto.
+- En prueba: `--strip_think` con `max_new_tokens=512` para ver si el base termina de
+  razonar y se recupera el concepto tras `</think>`.
+
+Implicancia de costo: si el base necesita ~512 tokens y los SFT responden en ~3, la
+comparación de las 5 se hará sobre un **subconjunto fijo** (~200–300 recetas), y
+opcionalmente el ganador SFT sobre el test completo.
+
 ## Qué falta y advertencias
 
 1. **La ablation nunca se evaluó río abajo.** 3 de las 4 celdas no tienen ninguna
