@@ -28,6 +28,16 @@ solo difieren en los ejes de la loss (pasados como override por CLI):
 - `length_normalize_concept_logprob: true` (ver advertencias).
 - Dataset: `datasets/final-10k` (`train.jsonl` + `dev.jsonl`, `max_dev_examples=1291`).
 
+Aclaraciones que suelen generar confusión:
+
+- **Base = versión Thinking**: las 4 usan `Qwen/Qwen3-4B-Thinking-2507` como
+  checkpoint base, pero la supervisión es **solo sobre el concepto final** (sin
+  `<think>` ni rationale en el target). Por eso responden directo en inferencia:
+  "versión thinking" es el checkpoint base, no el comportamiento entrenado.
+- **Ninguna entrenó con rationale**: `rationale_loss_weight = 0.0` en las cuatro
+  (las dos corridas previas al soporte de rationale ni siquiera tienen el campo; el
+  default del código es `0.0`). La única corrida rationale-first quedó cancelada.
+
 ## La matriz de losses (2×2)
 
 La familia de losses se parametriza por `candidate_weighting × candidate_aggregation`.
