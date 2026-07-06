@@ -258,6 +258,28 @@ opcionalmente el ganador SFT sobre el test completo.
 7. **Robustez de eval:** `max_new_tokens=8` trunca outputs; muestras repetidas entre
    sí; el tuning de settings de eval se hizo sobre un solo modelo.
 
+## Deuda técnica: checkpoints y staging de eval
+
+**Problema.** Cada `run_dir` pesa ~115 GiB, casi todo en `checkpoints/` (~38 GiB por
+checkpoint × 3): `accelerate` guarda el estado completo de optimizer/modelo para
+`--resume_from_checkpoint`, aunque en LoRA lo único entrenable sea el adapter (137 MiB).
+Con ~4 corridas son **~500 GiB en el bucket (~$10/mes)** de peso muerto: el
+entrenamiento ya terminó y los adapters (`best_adapter`/`final_adapter`) se guardan
+aparte. Además, `run_sft_eval` **descargaba el `run_dir` entero** al evaluar, lo que
+disparó el fallo de disco (100 GB) y ~17 min de startup por job.
+
+**Fix aplicado (2026-07-06).**
+- `run_sft_eval` / `download_gcs_prefix` ahora **excluye `checkpoints/`** al stagear el
+  `run_dir` (baja de ~115 GiB a ~150 MiB; startup de ~17 min a segundos).
+- `vertex_submit` expone `--boot-disk-gb` (default 200) para dar margen.
+
+**Pendiente (a resolver más adelante, NO hacer ahora):**
+- **Limpieza:** borrar los `checkpoints/` de las corridas viejas conservando los
+  adapters (libera ~500 GiB). Es destructivo: verificar antes que cada `best_adapter`/
+  `final_adapter` esté intacto.
+- **Entrenamiento futuro:** bajar `save_total_limit` o guardar solo el adapter por
+  checkpoint (contra: resume más débil). Aplica recién cuando se vuelva a entrenar.
+
 ## Próximo paso sugerido
 
 No hace falta re-entrenar nada: los adapters ya están. El plan:
