@@ -2,6 +2,8 @@ import sys
 from types import SimpleNamespace
 
 from src.eval.run_sft_eval import (
+    EvalRecord,
+    render_generation_prompt,
     apply_eval_precision_overrides,
     build_output_record,
     is_gcs_uri,
@@ -163,6 +165,34 @@ def test_strip_think_block_drops_unclosed_reasoning():
 
 def test_strip_think_block_passes_through_plain_text():
     assert strip_think_block("ice cream") == "ice cream"
+
+
+class _FakeChatTokenizer:
+    def apply_chat_template(self, messages, tokenize=False, add_generation_prompt=True, **kwargs):
+        return "<|im_start|>assistant\n<think>\n"
+
+
+def _qwen_record():
+    return EvalRecord(
+        pair_id="p", input_a="fire", input_b="water", canonical_output="steam", known_outputs=["steam"]
+    )
+
+
+def test_render_generation_prompt_close_think_closes_empty_block():
+    config = SFTConfig(prompt_format="qwen_chat", system_prompt="sys")
+
+    out = render_generation_prompt(_qwen_record(), config, _FakeChatTokenizer(), close_think=True)
+
+    assert "<think>" in out
+    assert out.rstrip().endswith("</think>")
+
+
+def test_render_generation_prompt_default_leaves_think_open():
+    config = SFTConfig(prompt_format="qwen_chat", system_prompt="sys")
+
+    out = render_generation_prompt(_qwen_record(), config, _FakeChatTokenizer(), close_think=False)
+
+    assert "</think>" not in out
 
 
 def test_summarize_creativity_extremes_includes_min_and_max_records():

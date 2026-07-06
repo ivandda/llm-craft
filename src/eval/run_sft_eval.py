@@ -107,6 +107,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=False,
         help="Drop any <think>...</think> reasoning block from generations before extracting the concept.",
     )
+    parser.add_argument(
+        "--close_think_prompt",
+        type=_str_to_bool,
+        default=False,
+        help="Pre-close an empty <think></think> in the prompt so a thinking base model answers directly.",
+    )
     return parser.parse_args(argv)
 
 
@@ -152,19 +158,25 @@ def download_gcs_file(uri: str, local_path: Path, client: Any) -> Path:
     return local_path
 
 
-def download_gcs_prefix(uri: str, local_dir: Path, client: Any) -> Path:
+def download_gcs_prefix(
+    uri: str, local_dir: Path, client: Any, exclude_dirs: list[str] | None = None
+) -> Path:
     log_progress(f"Downloading directory from {uri} to {local_dir}")
     bucket_name, blob_prefix = parse_gcs_uri(uri)
     prefix = blob_prefix.rstrip("/")
     if not prefix:
         raise ValueError(f"GCS directory URI must include a prefix: {uri!r}")
+    excluded = set(exclude_dirs or [])
     bucket = client.bucket(bucket_name)
     found_blob = False
     for blob in client.list_blobs(bucket, prefix=prefix + "/"):
         if blob.name.endswith("/"):
             continue
-        found_blob = True
         relative_path = Path(blob.name).relative_to(prefix)
+        # Skip whole subdirectories (e.g. multi-GB training checkpoints the eval never uses).
+        if relative_path.parts and relative_path.parts[0] in excluded:
+            continue
+        found_blob = True
         destination = local_dir / relative_path
         destination.parent.mkdir(parents=True, exist_ok=True)
         blob.download_to_filename(str(destination))
@@ -186,7 +198,11 @@ def stage_run_dir(run_dir: str, staging_root: Path, client: Any | None) -> Path:
         return Path(run_dir)
     if client is None:
         raise RuntimeError("A GCS client is required to stage a gs:// run_dir.")
-    return download_gcs_prefix(run_dir, staging_root / "run_dir", client)
+    # The eval only needs config.yaml + the adapter; checkpoints can be 100+ GB and
+    # would blow the worker disk and startup time, so skip them.
+    return download_gcs_prefix(
+        run_dir, staging_root / "run_dir", client, exclude_dirs=["checkpoints"]
+    )
 
 
 def stage_input_file(path_or_uri: str, staging_root: Path, client: Any | None, label: str) -> Path:
@@ -278,6 +294,7 @@ def render_generation_prompt(
     tokenizer: Any,
     *,
     enable_thinking: bool | None = None,
+    close_think: bool = False,
 ) -> str:
     if config.prompt_format == "qwen_chat":
         messages = []
@@ -287,9 +304,14 @@ def render_generation_prompt(
         template_kwargs: dict[str, Any] = {}
         if enable_thinking is not None:
             template_kwargs["enable_thinking"] = enable_thinking
-        return tokenizer.apply_chat_template(
+        prompt = tokenizer.apply_chat_template(
             messages, tokenize=False, add_generation_prompt=True, **template_kwargs
         )
+        if close_think and "<think>" in prompt and "</think>" not in prompt:
+            # Pre-close an empty reasoning block so a thinking model answers directly
+            # instead of spending the whole budget inside <think>.
+            prompt = prompt.rstrip() + "\n</think>\n\n"
+        return prompt
     return render_prefix(record.input_a, record.input_b)
 
 
@@ -514,7 +536,13 @@ def main(argv: list[str] | None = None) -> None:
         prediction_records: list[dict[str, Any]] = []
         log_progress(f"Starting generation for {len(eval_records)} recipes with num_samples={args.num_samples}")
         for index, record in enumerate(eval_records, start=1):
-            prompt = render_generation_prompt(record, run_config, tokenizer, enable_thinking=args.enable_thinking)
+            prompt = render_generation_prompt(
+                record,
+                run_config,
+                tokenizer,
+                enable_thinking=args.enable_thinking,
+                close_think=args.close_think_prompt,
+            )
             encoded = tokenizer(prompt, return_tensors="pt").to(next(model.parameters()).device)
             generation = model.generate(
                 **encoded,
@@ -563,6 +591,7 @@ def main(argv: list[str] | None = None) -> None:
                 "no_adapter": args.no_adapter,
                 "enable_thinking": args.enable_thinking,
                 "strip_think": args.strip_think,
+                "close_think_prompt": args.close_think_prompt,
                 "eval_file": args.eval_file,
                 "num_samples": args.num_samples,
                 "max_new_tokens": args.max_new_tokens,
