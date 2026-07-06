@@ -6,12 +6,15 @@ number of models can be compared and re-scored for free, without re-running them
 
 Primary metric: coverage/accuracy against the recipe's known_outputs (normalized
 string match), reported both for the top-1 sample and as any@K over all samples.
-Verbosity is tracked too, since the task target is <=2 words.
+An optional semantic coverage (embedding cosine >= threshold) credits outputs that
+are correct but not an exact string. Verbosity is tracked too, since the task
+target is <=2 words.
 
 Usage:
     python -m src.eval.score_coverage PREDICTIONS_A.jsonl PREDICTIONS_B.jsonl
     python -m src.eval.score_coverage gs://bucket/eval_outputs/run/predictions.jsonl
     python -m src.eval.score_coverage --labels base,concept_set a.jsonl b.jsonl
+    python -m src.eval.score_coverage --semantic_threshold 0.7 a.jsonl b.jsonl
 """
 
 from __future__ import annotations
@@ -21,6 +24,8 @@ import json
 import subprocess
 from pathlib import Path
 from typing import Any
+
+import numpy as np
 
 from src.eval.metrics import evaluate_prediction, normalize_answer
 
@@ -78,6 +83,43 @@ def score_records(records: list[dict[str, Any]]) -> dict[str, float]:
     }
 
 
+def _max_cosine_to_known(sample_vec: np.ndarray, known_matrix: np.ndarray) -> float:
+    sample_norm = np.linalg.norm(sample_vec)
+    if sample_norm == 0 or known_matrix.size == 0:
+        return 0.0
+    known_norms = np.linalg.norm(known_matrix, axis=1)
+    known_norms[known_norms == 0] = 1.0
+    cosines = (known_matrix @ sample_vec) / (known_norms * sample_norm)
+    return float(cosines.max())
+
+
+def semantic_coverage(records: list[dict[str, Any]], embedder: Any, threshold: float) -> dict[str, float]:
+    """Coverage where a sample counts if its cosine to any known output >= threshold."""
+    n = 0
+    top1 = 0
+    anyk = 0
+    for record in records:
+        samples = record.get("sampled_outputs") or [record.get("prediction", "")]
+        known_outputs = record.get("known_outputs") or []
+        if not known_outputs:
+            continue
+        n += 1
+        known_matrix = np.asarray(embedder.encode(known_outputs), dtype=float)
+        sample_matrix = np.asarray(embedder.encode(samples), dtype=float)
+        sims = [_max_cosine_to_known(sample_matrix[i], known_matrix) for i in range(len(samples))]
+        if sims and sims[0] >= threshold:
+            top1 += 1
+        if any(sim >= threshold for sim in sims):
+            anyk += 1
+    if n == 0:
+        return {"top1_semantic_match": 0.0, "anyk_semantic_match": 0.0, "semantic_threshold": threshold}
+    return {
+        "top1_semantic_match": top1 / n,
+        "anyk_semantic_match": anyk / n,
+        "semantic_threshold": threshold,
+    }
+
+
 def load_prediction_records(path: str) -> list[dict[str, Any]]:
     if path.startswith("gs://"):
         completed = subprocess.run(
@@ -95,41 +137,41 @@ def _default_label(path: str) -> str:
 
 
 def format_comparison(labeled_scores: list[tuple[str, dict[str, float]]]) -> str:
-    columns = [
-        ("model", 34, "{:<34}"),
-        ("n", 6, "{:>6}"),
-        ("top1_known", 11, "{:>11.3f}"),
-        ("any@k_known", 12, "{:>12.3f}"),
-        ("top1_canon", 11, "{:>11.3f}"),
-        ("any@k_canon", 12, "{:>12.3f}"),
-        ("empty", 7, "{:>7.3f}"),
-        ("words", 7, "{:>7.2f}"),
-        ("<=2w", 7, "{:>7.3f}"),
+    has_semantic = any("top1_semantic_match" in scores for _, scores in labeled_scores)
+    columns: list[tuple[str, Any]] = [
+        ("model", lambda label, s: label),
+        ("n", lambda label, s: str(int(s["n"]))),
+        ("top1_known", lambda label, s: f"{s['top1_known_match']:.3f}"),
+        ("any@k_known", lambda label, s: f"{s['anyk_known_match']:.3f}"),
+        ("top1_canon", lambda label, s: f"{s['top1_canonical_match']:.3f}"),
+        ("any@k_canon", lambda label, s: f"{s['anyk_canonical_match']:.3f}"),
     ]
-    keys = [
-        None,
-        "n",
-        "top1_known_match",
-        "anyk_known_match",
-        "top1_canonical_match",
-        "anyk_canonical_match",
-        "empty_top1_rate",
-        "mean_top1_words",
-        "frac_top1_le2_words",
+    if has_semantic:
+        columns += [
+            ("top1_sem", lambda label, s: f"{s.get('top1_semantic_match', float('nan')):.3f}"),
+            ("any@k_sem", lambda label, s: f"{s.get('anyk_semantic_match', float('nan')):.3f}"),
+        ]
+    columns += [
+        ("empty", lambda label, s: f"{s['empty_top1_rate']:.3f}"),
+        ("words", lambda label, s: f"{s['mean_top1_words']:.2f}"),
+        ("<=2w", lambda label, s: f"{s['frac_top1_le2_words']:.3f}"),
     ]
-    header = " ".join(f"{name:<{width}}" if fmt.startswith("{:<") else f"{name:>{width}}"
-                       for (name, width, fmt), _ in zip(columns, keys))
-    lines = [header, "-" * len(header)]
+
+    rows = [[title for title, _ in columns]]
     for label, scores in labeled_scores:
-        cells = []
-        for (name, width, fmt), key in zip(columns, keys):
-            if key is None:
-                cells.append(fmt.format(label[:width]))
-            elif key == "n":
-                cells.append(fmt.format(int(scores[key])))
-            else:
-                cells.append(fmt.format(scores[key]))
-        lines.append(" ".join(cells))
+        rows.append([getter(label, scores) for _, getter in columns])
+    widths = [max(len(row[i]) for row in rows) for i in range(len(columns))]
+
+    lines = []
+    for row_index, row in enumerate(rows):
+        cells = [
+            cell.ljust(widths[i]) if i == 0 else cell.rjust(widths[i])
+            for i, cell in enumerate(row)
+        ]
+        line = "  ".join(cells)
+        lines.append(line)
+        if row_index == 0:
+            lines.append("-" * len(line))
     return "\n".join(lines)
 
 
@@ -138,6 +180,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("predictions", nargs="+", help="One or more predictions.jsonl paths (local or gs://).")
     parser.add_argument("--labels", default=None, help="Comma-separated labels, one per predictions file.")
     parser.add_argument("--json", action="store_true", help="Also print the raw scores as JSON.")
+    parser.add_argument(
+        "--semantic_threshold",
+        type=float,
+        default=None,
+        help="If set, also compute embedding-based semantic coverage (cosine >= threshold).",
+    )
+    parser.add_argument("--embedding_backend", default="sentence_embeddings")
+    parser.add_argument("--embedding_model_path", default=None)
+    parser.add_argument("--sentence_embedding_model", default="sentence-transformers/all-MiniLM-L6-v2")
+    parser.add_argument("--embedding_device", default="cpu")
     return parser.parse_args(argv)
 
 
@@ -147,10 +199,24 @@ def main(argv: list[str] | None = None) -> None:
     if len(labels) != len(args.predictions):
         raise ValueError("Number of --labels must match number of predictions files.")
 
+    embedder = None
+    if args.semantic_threshold is not None:
+        from src.eval.embeddings import build_text_embedder
+
+        embedder = build_text_embedder(
+            args.embedding_backend,
+            word_vector_path=args.embedding_model_path,
+            sentence_transformer_model=args.sentence_embedding_model,
+            device=args.embedding_device,
+        )
+
     labeled_scores: list[tuple[str, dict[str, float]]] = []
     for label, path in zip(labels, args.predictions):
         records = load_prediction_records(path)
-        labeled_scores.append((label, score_records(records)))
+        scores = score_records(records)
+        if embedder is not None:
+            scores.update(semantic_coverage(records, embedder, args.semantic_threshold))
+        labeled_scores.append((label, scores))
 
     print(format_comparison(labeled_scores))
     if args.json:
