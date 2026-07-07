@@ -57,6 +57,12 @@ def parse_args() -> argparse.Namespace:
         help="Worker boot disk size in GB. The Vertex default (100) can run low when the base model download plus staged run_dir share the disk.",
     )
     parser.add_argument("--boot-disk-type", default="pd-ssd")
+    parser.add_argument(
+        "--no-wait",
+        action="store_true",
+        help="Submit the job and return immediately instead of streaming until it finishes. "
+        "Use for fire-and-forget batches so the local process is not a single point of failure.",
+    )
 
     # train.py passthrough. Paths default to the GCS FUSE mount.
     parser.add_argument(
@@ -162,6 +168,12 @@ def main() -> None:
         print(f"  output: gs://{args.bucket}/runs/ (run dir created by train.py)")
     else:
         print("  args:   forwarded exactly from the extra '-- ...' section")
+    if args.no_wait:
+        job.submit()
+        resource_name = job_resource_name(job)
+        print(f"[vertex-submit] Submitted (no-wait): {resource_name}", flush=True)
+        print("[vertex-submit] The job runs on Vertex independently of this process.", flush=True)
+        return
     try:
         job.run()
     except KeyboardInterrupt:
