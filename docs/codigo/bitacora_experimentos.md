@@ -3,11 +3,12 @@
 Registro de lo que se entrenó y evaluó hasta ahora en GCP, reconstruido a partir de
 los `args` de los Custom Jobs, los `run_dir` en el bucket y las métricas guardadas.
 El objetivo es que el estado del proyecto quede claro y no haya que reconstruirlo
-de memoria. Última actualización: 2026-07-06.
+de memoria. Última actualización: 2026-07-07.
 
-> Nota: la mayoría de las conclusiones de "ranking" NO se pueden sacar todavía
-> (ver [Qué falta y advertencias](#qué-falta-y-advertencias)). Esta bitácora
-> documenta *qué se corrió*, no *qué loss ganó*.
+> **Actualización 2026-07-07: la ablation ya se evaluó río abajo.** Las 4 celdas de
+> loss + el baseline base se corrieron sobre el test completo (1263 recetas). Ganó
+> **`soft_ce` (dataset × expected_logprob)** por cobertura. Detalle en
+> [Resultados de la ablation](#resultados-de-la-ablation-evaluación-generativa-completa-2026-07-07).
 
 ## Infraestructura
 
@@ -157,6 +158,82 @@ se puede afirmar que el SFT mejore la creatividad respecto de Qwen sin entrenar.
 > Aclaración de nombres: el job `2026-07-06 qwen3-4b-eval-full-l4-base`, pese al
 > "base" en el nombre, re-evaluó el *adapter* `2026-07-01`, no el modelo base.
 
+## Resultados de la ablation (evaluación generativa completa, 2026-07-07)
+
+Las **4 celdas de loss** + el **baseline base** (`--no_adapter`) se evaluaron sobre el
+**test completo (1263 recetas)** con `src/eval/run_sft_eval.py` y luego se puntuaron
+offline con `src/eval/score_coverage.py`. Config de decoding idéntica a la corrida
+validada del 07-01 (`num_samples=4`, `max_new_tokens=8`, `temperature=0.6`,
+`top_p=0.9`, `top_k=40`, `repetition_penalty=1.15`, `no_repeat_ngram_size=3`,
+`max_concept_words=3`). Predicciones en `gs://llm-craft-bucket/eval_outputs/cu126_*_test/`.
+
+**Infra:** imagen reconstruida con **torch 2.12.1+cu126** (la de entrenamiento era
+cu130, incompatible con el driver CUDA 12.2 de los nodos T4/A100 → caía a CPU). Las 5
+evals corrieron en **A100 80GB, todas en bf16** (misma precisión ⇒ comparación limpia;
+se descartó T4 porque solo soporta fp16). Ver
+[Crisis de GPU](#crisis-de-gpu-imagen-cuda-12-2026-07-0607) más abajo.
+
+### Cobertura (métrica primaria) — coincidencia con `known_outputs`
+
+| Modelo (weighting × aggregation) | top1_known | any@k_known | top1_canon | any@k_canon | ≤2 palabras |
+|---|---|---|---|---|---|
+| **`soft_ce`** (dataset × expected_logprob) | 0.073 | **0.143** | **0.042** | **0.073** | **40.9%** |
+| `ce_uniform` (uniform × expected_logprob) | **0.075** | 0.134 | 0.038 | 0.064 | 33.7% |
+| `concept_set` (dataset × logsumexp) | 0.040 | 0.077 | 0.026 | 0.041 | 24.0% |
+| `concept_set_uniform` (uniform × logsumexp) | 0.038 | 0.075 | 0.025 | 0.041 | 18.2% |
+| **base** (sin SFT, `--close_think_prompt`) | **0.000** | **0.000** | **0.000** | **0.000** | 1.3% |
+
+Cobertura semántica (coseno ≥0.75 a un `known_output`, MiniLM), como robustez:
+
+| Modelo | top1_sem | any@k_sem |
+|---|---|---|
+| `soft_ce` | **0.337** | **0.511** |
+| `ce_uniform` | 0.290 | 0.476 |
+| `concept_set` | 0.274 | 0.410 |
+| `concept_set_uniform` | 0.259 | 0.394 |
+| base | 0.000 | 0.000 |
+
+### CCS (métrica secundaria / exploratoria)
+
+| Modelo | CCS | plaus | novelty | diversity |
+|---|---|---|---|---|
+| `concept_set` | 0.324 | 0.780 | 0.304 | 0.887 |
+| `concept_set_uniform` | 0.321 | 0.776 | 0.306 | 0.877 |
+| `soft_ce` | 0.318 | 0.786 | 0.303 | 0.850 |
+| `ce_uniform` | 0.313 | 0.781 | 0.301 | 0.841 |
+| base | 0.284 | 0.600 | 0.409 | 0.829 |
+
+### Conclusiones
+
+1. **El SFT es necesario y efectivo.** El base saca **0.0% de cobertura** en todas las
+   métricas (exacta, canónica y semántica), incluso con el mejor trato posible del
+   thinking (`--close_think_prompt` + `--strip_think`). Cualitativamente el base no
+   produce conceptos sino *fragmentos de razonamiento*: `cream+ice → "Hmm the user"`,
+   `energy+tree → "We are combining"`. Los SFT sí producen conceptos on-task
+   (`energy+tree → "photosynthesis"` exacto; `hut+steam → "sauna hut"`).
+2. **Ganador: `soft_ce` (dataset × expected_logprob).** Lidera en 6 de 7 métricas de
+   cobertura (todas salvo top1_known, donde `ce_uniform` empata a 0.2 pp, dentro del
+   ruido) y es el **menos verboso** (40.9% de respuestas ≤2 palabras, alineado con la
+   preferencia de outputs cortos).
+3. **El eje que manda es la *agregación*, no el *weighting*.** `expected_logprob`
+   (soft_ce, ce_uniform ≈ 7.5% top1) **duplica** a `logsumexp` (concept_set,
+   cs_uniform ≈ 4%). Dentro de cada agregación, `dataset` vs `uniform` apenas se
+   distingue. Interpretación: promediar la NLL por candidato (soft-CE) enseña a
+   generar la respuesta *modal*; el log-sum-exp reparte masa sobre el conjunto y
+   diluye el top-1.
+4. **CCS contradice a cobertura y por eso queda como secundaria.** El CCS rankea
+   `concept_set` **primero** (0.324) — exactamente al revés que cobertura — porque
+   premia diversidad/novedad (concept_set diverge más de los inputs) sin verificar si
+   la respuesta es *correcta*. Esto confirma la decisión de usar cobertura como métrica
+   primaria y tratar el CCS como exploratorio. La diferencia de CCS entre las 4 celdas
+   (0.313–0.324) es además ruido; no sirve para elegir.
+
+➡️ **Decisión: adoptar `soft_ce` (dataset × expected_logprob) como la loss ganadora del
+SFT.** Las cifras absolutas son bajas (7% top1 exacto) porque el target admite muchos
+sinónimos no listados; la cobertura semántica (34% top1 / 51% any@k) y los ejemplos
+cualitativos muestran que las respuestas son razonables. Punto de partida sólido para
+un eventual DPO.
+
 ## Procedencia y reproducibilidad
 
 Cada `run_dir` guarda su procedencia en GCS (persistente, independiente de cualquier laptop):
@@ -242,10 +319,12 @@ opcionalmente el ganador SFT sobre el test completo.
 
 ## Qué falta y advertencias
 
-1. **La ablation nunca se evaluó río abajo.** 3 de las 4 celdas no tienen ninguna
-   métrica generativa. La pregunta central del experimento sigue sin respuesta.
-2. **Falta baseline de creatividad del modelo base.** Requiere un modo "sin adapter"
-   en `run_sft_eval.py` (hoy siempre carga un adapter PEFT).
+1. ~~**La ablation nunca se evaluó río abajo.**~~ ✅ **Resuelto (2026-07-07):** las 4
+   celdas se evaluaron sobre el test completo; ganó `soft_ce`. Ver
+   [Resultados de la ablation](#resultados-de-la-ablation-evaluación-generativa-completa-2026-07-07).
+2. ~~**Falta baseline de creatividad del modelo base.**~~ ✅ **Resuelto (2026-07-07):**
+   se agregó `--no_adapter` a `run_sft_eval.py` y se corrió el baseline base (0.0% de
+   cobertura). El modo sin-adapter ya existe.
 3. **No rankear por dev loss** entre losses distintas (ver arriba).
 4. **`best_metric` / `best_model_checkpoint` = `None`** en todas las corridas: la
    selección de "mejor adapter" no está atada a una métrica. Fue inocuo (dev loss
@@ -280,9 +359,58 @@ disparó el fallo de disco (100 GB) y ~17 min de startup por job.
 - **Entrenamiento futuro:** bajar `save_total_limit` o guardar solo el adapter por
   checkpoint (contra: resume más débil). Aplica recién cuando se vuelva a entrenar.
 
+## Crisis de GPU: imagen CUDA-12 (2026-07-06/07)
+
+**Síntoma.** Al intentar correr las evals, los jobs en T4 y A100 caían a **CPU** (una
+eval de 4B tarda horas), mientras que L4 sí usaba GPU pero tenía poca capacidad
+(jobs encolados).
+
+**Causa raíz.** El wheel de `torch 2.12.1` por defecto de PyPI trae runtime **CUDA 13**
+(`nvidia-*-cu13`), que exige un driver CUDA 13. Los nodos T4/A100 de Vertex en
+us-central1 tienen driver **CUDA 12.2** (`found version 12020`), un major por detrás ⇒
+sin compatibilidad ⇒ torch no ve la GPU y cae a CPU. Solo los nodos L4 tenían driver
+nuevo, de ahí que fuera el único que "funcionaba".
+
+**Fix (2026-07-07).** Se ancló torch al índice **cu126** de PyTorch (solo en Linux; en
+macOS sigue el wheel de PyPI para no romper el dev local ni el `uv lock`):
+
+```toml
+# pyproject.toml
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu126", marker = "sys_platform == 'linux'" }]
+```
+
+cu126 corre sobre la familia de driver R525+, que el driver 12.2 (R535) cumple (CUDA
+minor-version compatibility). Se reconstruyó la imagen y un smoke en A100 80GB confirmó
+`Model ready on device cuda:0`. Esto **desbloquea A100 y T4** además de L4.
+
+**Cuota.** Se subió la cuota `CustomModelTrainingA10080GBGPUsPerProjectPerRegion` en
+us-central1 de **1 → 4** (via Cloud Quotas API), permitiendo correr evals/trainings en
+paralelo. (Quedó una preferencia vieja en `africa-south1` con granted=0, inocua.)
+
+**Robustez de submit.** Se agregó `--no-wait` a `vertex_submit.py`: hace `job.submit()`
+(async) en vez de `job.run()` (bloqueante), para que un proceso local que se muera no
+sea single-point-of-failure de un batch. ⚠️ **Lección:** al pasar flags extra por
+`-- ...`, hacerlo como tokens separados (o array bash `"${GEN[@]}"`), **no** como una
+string sin comillas: dos jobs fallaron porque los 9 flags de decoding llegaron como
+**un solo token** argv y argparse los rechazó.
+
 ## Próximo paso sugerido
 
-No hace falta re-entrenar nada: los adapters ya están. El plan:
+> ✅ **El plan de abajo se ejecutó (2026-07-07).** Resultado: ganó `soft_ce`. Ver
+> [Resultados de la ablation](#resultados-de-la-ablation-evaluación-generativa-completa-2026-07-07).
+> Lo que sigue a partir de acá:
+> - **(opcional) DPO** partiendo del adapter `soft_ce`, usando `known_outputs` como
+>   preferidos y las muestras que no matchean como rechazados.
+> - **Limpieza de `checkpoints/`** (~500 GiB de peso muerto), cuando se decida.
+> - **Reentrenar solo si** se quiere probar un prompt de student más fuerte / límite de
+>   palabras explícito (requiere reentrenar, ver sección de prompts).
+
+El plan original (ya ejecutado), para referencia:
 
 1. **Métrica primaria = cobertura/accuracy** contra `known_outputs` (top-1 y top-K
    sobre las 4 muestras; exacta normalizada + opcional semántica por embeddings).
