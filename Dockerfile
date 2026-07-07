@@ -1,6 +1,8 @@
-# Training image for src/sft/train.py on Vertex AI Custom Training (1x NVIDIA L4).
+# Training image for src/sft/train.py on Vertex AI Custom Training GPUs.
 # CUDA runtime base provides the libraries torch/bitsandbytes link against;
-# the GPU driver is supplied by the Vertex node.
+# the GPU driver is supplied by the Vertex node. torch is pinned to a CUDA-12.6
+# build (see [tool.uv.sources] in pyproject.toml) so it runs on the CUDA-12.2
+# driver of the T4/A100 nodes; the default CUDA-13 wheel falls back to CPU there.
 FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive \

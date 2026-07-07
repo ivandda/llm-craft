@@ -43,5 +43,18 @@ vertex = [
 # Keep local `uv sync` behavior unchanged (installs project + dev + agents).
 default-groups = ["dev", "agents"]
 
+# The default PyPI torch wheel bundles a CUDA 13 runtime (nvidia-*-cu13), which
+# needs a CUDA-13 driver. The Vertex T4/A100 nodes ship a CUDA-12.2 driver, so
+# that wheel falls back to CPU there. Pin the Linux torch build to PyTorch's
+# CUDA-12.6 index (runs on the R525+ driver family, which the 12.2 nodes clear).
+# macOS keeps the default PyPI wheel so local dev and `uv lock` still resolve.
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu126", marker = "sys_platform == 'linux'" }]
+
 [tool.pytest.ini_options]
 pythonpath = ["."]
