@@ -6,6 +6,12 @@ import {
   requestLeaderboard,
   requestLeaderboardSubmission
 } from "@/lib/api";
+import {
+  DEFAULT_VERTEX_MODEL,
+  getVertexModelLabel,
+  isKnownVertexModel,
+  VERTEX_MODEL_OPTIONS
+} from "@/lib/agentModels";
 import { mergeInventory } from "@/lib/craft";
 import { selectDpoCandidates } from "@/lib/dpo";
 import { getInitialInventoryForMode } from "@/lib/gameModes";
@@ -133,7 +139,8 @@ export function CraftGame({
       board: createGameStorageKey(user.id, mode, "board"),
       darkMode: createGameStorageKey(user.id, mode, "darkMode"),
       consumeInputs: createGameStorageKey(user.id, mode, "consumeInputs"),
-      dpoTestMode: createGameStorageKey(user.id, mode, "dpoTestMode")
+      dpoTestMode: createGameStorageKey(user.id, mode, "dpoTestMode"),
+      combinerModel: createGameStorageKey(user.id, mode, "combinerModel")
     }),
     [mode, user.id]
   );
@@ -150,6 +157,8 @@ export function CraftGame({
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [consumeInputsOnCombine, setConsumeInputsOnCombine] = useState(true);
   const [isDpoTestMode, setIsDpoTestMode] = useState(false);
+  const [selectedCombinerModel, setSelectedCombinerModel] =
+    useState(DEFAULT_VERTEX_MODEL);
   const [pendingDpoChoice, setPendingDpoChoice] = useState<PendingDpoChoice | null>(
     null
   );
@@ -176,6 +185,7 @@ export function CraftGame({
     setIsDarkMode(readStoredValue(storageKeys.darkMode, false));
     setConsumeInputsOnCombine(readStoredValue(storageKeys.consumeInputs, true));
     setIsDpoTestMode(readStoredValue(storageKeys.dpoTestMode, false));
+    setSelectedCombinerModel(readStoredCombinerModel(storageKeys.combinerModel));
     setPendingDpoChoice(null);
     setResult(null);
     setErrorMessage(null);
@@ -237,6 +247,15 @@ export function CraftGame({
       );
     }
   }, [hasHydratedStorage, isDpoTestMode, storageKeys.dpoTestMode]);
+
+  useEffect(() => {
+    if (hasHydratedStorage) {
+      window.localStorage.setItem(
+        storageKeys.combinerModel,
+        JSON.stringify(selectedCombinerModel)
+      );
+    }
+  }, [hasHydratedStorage, selectedCombinerModel, storageKeys.combinerModel]);
 
   useEffect(() => {
     onSnapshotChange?.({ inventory, history });
@@ -334,7 +353,8 @@ export function CraftGame({
       const response = await requestCombination({
         inputA: firstInput,
         inputB: secondInput,
-        inventory
+        inventory,
+        model: selectedCombinerModel
       });
       const combinationsUsed = history.length + 1;
       const dpoCandidates = isDpoTestMode
@@ -915,6 +935,21 @@ export function CraftGame({
                 type="checkbox"
               />
             </label>
+            <label className="mt-2 grid gap-1 rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm font-medium dark:border-zinc-700 dark:bg-zinc-900">
+              <span>Combiner model</span>
+              <select
+                className="h-9 rounded-md border border-zinc-200 bg-white px-2 text-sm outline-none transition focus:border-zinc-400 disabled:cursor-wait disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-950 dark:focus:border-zinc-500"
+                disabled={isCombining}
+                onChange={(event) => setSelectedCombinerModel(event.target.value)}
+                value={selectedCombinerModel}
+              >
+                {VERTEX_MODEL_OPTIONS.map((model) => (
+                  <option key={model.id} value={model.id}>
+                    {model.label}
+                  </option>
+                ))}
+              </select>
+            </label>
           </div>
 
           <div className="grid min-h-0 flex-1 grid-cols-2 content-start gap-2 overflow-y-auto pr-1">
@@ -1459,11 +1494,16 @@ function StatusToast({
           </div>
           <div className="mt-2 flex flex-wrap gap-2 text-xs text-zinc-500 dark:text-zinc-400">
             <span className="rounded border border-zinc-200 bg-zinc-50 px-2 py-1 dark:border-zinc-700 dark:bg-zinc-900">
-              {result.source === "known_recipe" ? "known recipe" : "mock model"}
+              {formatCombineSource(result.source)}
             </span>
             {typeof result.confidence === "number" ? (
               <span className="rounded border border-zinc-200 bg-zinc-50 px-2 py-1 dark:border-zinc-700 dark:bg-zinc-900">
                 {Math.round(result.confidence * 100)}%
+              </span>
+            ) : null}
+            {result.source === "model_generated" && result.model ? (
+              <span className="rounded border border-zinc-200 bg-zinc-50 px-2 py-1 dark:border-zinc-700 dark:bg-zinc-900">
+                {getVertexModelLabel(result.model)}
               </span>
             ) : null}
           </div>
@@ -1486,7 +1526,7 @@ function RecipeCard({ item }: { item: RecipeHistoryItem }) {
           {formatElementName(item.output)}
         </span>
         <span className="rounded border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-500 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-400">
-          {item.source === "known_recipe" ? "known" : "mock"}
+          {formatCombineSource(item.source)}
         </span>
       </div>
     </div>
@@ -1546,6 +1586,10 @@ function formatElementName(element: ElementToken): string {
   return `${element.emoji ? `${element.emoji} ` : ""}${element.name}`;
 }
 
+function formatCombineSource(source: CombineResponse["source"]): string {
+  return source === "known_recipe" ? "known recipe" : "model";
+}
+
 function toElementToken(element: ElementToken): ElementToken {
   return {
     id: element.id,
@@ -1567,4 +1611,9 @@ function readStoredValue<T>(key: string, fallback: T): T {
   } catch {
     return fallback;
   }
+}
+
+function readStoredCombinerModel(key: string): string {
+  const storedModel = readStoredValue(key, DEFAULT_VERTEX_MODEL);
+  return isKnownVertexModel(storedModel) ? storedModel : DEFAULT_VERTEX_MODEL;
 }

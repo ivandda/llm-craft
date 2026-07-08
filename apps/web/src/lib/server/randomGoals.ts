@@ -92,7 +92,10 @@ export function isValidGoalDepth(depth: unknown): depth is number {
   );
 }
 
-export async function generateRandomGoal(depth: number): Promise<GoalPreset> {
+export async function generateRandomGoal(
+  depth: number,
+  seed = createDailyGoalSeed(depth)
+): Promise<GoalPreset> {
   if (!isValidGoalDepth(depth)) {
     throw new Error("Invalid goal depth");
   }
@@ -100,7 +103,7 @@ export async function generateRandomGoal(depth: number): Promise<GoalPreset> {
   const recipes = await listGoalRecipes();
   return (
     buildRandomGoalFromRecipes(recipes, depth, {
-      seed: createDailyGoalSeed(depth)
+      seed
     }) ?? GOAL_PRESET
   );
 }

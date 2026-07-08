@@ -21,10 +21,12 @@ import type {
   GoalPreset,
   UserProfile
 } from "@/lib/types";
+import { AgentTest } from "@/components/AgentTest";
 import { CraftGame } from "@/components/CraftGame";
 import {
   ArrowLeft,
   BadgeCheck,
+  Bot,
   LogIn,
   LogOut,
   Play,
@@ -97,6 +99,11 @@ export function AppShell() {
       return;
     }
 
+    if (mode === "agent-test") {
+      setSelectedMode("agent-test");
+      return;
+    }
+
     await generateNewGoal();
     setSelectedMode("goal");
   }
@@ -133,6 +140,18 @@ export function AppShell() {
         onLogout={handleLogout}
         onOpenProfile={() => setIsProfileOpen(true)}
         onSelectMode={handleSelectMode}
+      />
+    );
+  }
+
+  if (selectedMode === "agent-test") {
+    return (
+      <AgentTest
+        goalDepth={goalDepth}
+        user={session.user}
+        onBackToMenu={() => setSelectedMode(null)}
+        onGoalDepthChange={setGoalDepth}
+        onLogout={handleLogout}
       />
     );
   }
@@ -315,7 +334,7 @@ function ModeMenu({
           </div>
         </header>
 
-        <section className="grid flex-1 gap-4 md:grid-cols-2">
+        <section className="grid flex-1 gap-4 lg:grid-cols-3">
           <ModeCard
             accentClassName="border-amber-300 bg-amber-50 hover:border-amber-400 hover:bg-amber-100"
             icon={<Sparkles size={22} />}
@@ -334,6 +353,16 @@ function ModeMenu({
             resultElement="🏁"
             label={isGeneratingGoal ? "Generating" : "Goal"}
             onClick={() => onSelectMode("goal")}
+          />
+          <ModeCard
+            accentClassName="border-emerald-300 bg-emerald-50 hover:border-emerald-400 hover:bg-emerald-100"
+            compactPreview
+            icon={<Bot size={22} />}
+            modeLabel={`Agent run at depth ${goalDepth}`}
+            previewElements={["🤖"]}
+            resultElement="🤖"
+            label="Agent Test"
+            onClick={() => onSelectMode("agent-test")}
           />
         </section>
         <div className="flex flex-wrap items-center gap-3 rounded-md border border-sky-200 bg-white/80 px-4 py-3 shadow-hairline">
@@ -364,6 +393,7 @@ function ModeMenu({
 function ModeCard({
   accentClassName,
   disabled = false,
+  compactPreview = false,
   icon,
   label,
   modeLabel,
@@ -373,6 +403,7 @@ function ModeCard({
 }: {
   accentClassName: string;
   disabled?: boolean;
+  compactPreview?: boolean;
   icon: ReactNode;
   label: string;
   modeLabel: string;
@@ -403,24 +434,32 @@ function ModeCard({
         </div>
 
         <div className="grid gap-5">
-          <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3">
-            <div className="grid grid-cols-2 gap-2">
-              {previewElements.map((element, index) => (
-                <span
-                  className="grid aspect-square place-items-center rounded-md border border-zinc-300 bg-white/85 text-3xl shadow-sm transition duration-200 group-hover:-translate-y-1 group-hover:rotate-2"
-                  key={`${element}-${index}`}
-                >
-                  {element}
-                </span>
-              ))}
+          {compactPreview ? (
+            <div className="grid place-items-center py-6">
+              <span className="grid size-36 place-items-center rounded-md border border-emerald-300 bg-white text-7xl shadow-md transition duration-200 group-hover:-translate-y-2 group-hover:rotate-3">
+                {resultElement}
+              </span>
             </div>
-            <span className="grid size-12 place-items-center rounded-md border border-zinc-300 bg-white/80 text-zinc-600 transition group-hover:scale-110">
-              <Play size={18} />
-            </span>
-            <span className="grid aspect-square place-items-center rounded-md border border-zinc-300 bg-white text-5xl shadow-md transition duration-200 group-hover:-translate-y-2 group-hover:rotate-3">
-              {resultElement}
-            </span>
-          </div>
+          ) : (
+            <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3">
+              <div className="grid grid-cols-2 gap-2">
+                {previewElements.map((element, index) => (
+                  <span
+                    className="grid aspect-square place-items-center rounded-md border border-zinc-300 bg-white/85 text-3xl shadow-sm transition duration-200 group-hover:-translate-y-1 group-hover:rotate-2"
+                    key={`${element}-${index}`}
+                  >
+                    {element}
+                  </span>
+                ))}
+              </div>
+              <span className="grid size-12 place-items-center rounded-md border border-zinc-300 bg-white/80 text-zinc-600 transition group-hover:scale-110">
+                <Play size={18} />
+              </span>
+              <span className="grid aspect-square place-items-center rounded-md border border-zinc-300 bg-white text-5xl shadow-md transition duration-200 group-hover:-translate-y-2 group-hover:rotate-3">
+                {resultElement}
+              </span>
+            </div>
+          )}
 
           <div className="flex items-center justify-between gap-3 rounded-md border border-zinc-300 bg-white/80 px-4 py-3">
             <span className="text-sm font-semibold text-zinc-700">Play</span>
@@ -431,16 +470,18 @@ function ModeCard({
         </div>
       </div>
 
-      <div className="pointer-events-none absolute -bottom-10 -right-8 grid grid-cols-3 gap-2 opacity-30 transition duration-200 group-hover:-translate-y-2 group-hover:opacity-45">
-        {previewElements.concat(resultElement).map((element, index) => (
-          <span
-            className="grid size-12 place-items-center rounded-md border border-zinc-300 bg-white text-xl"
-            key={`${element}-ghost-${index}`}
-          >
-            {element}
-          </span>
-        ))}
-      </div>
+      {!compactPreview ? (
+        <div className="pointer-events-none absolute -bottom-10 -right-8 grid grid-cols-3 gap-2 opacity-30 transition duration-200 group-hover:-translate-y-2 group-hover:opacity-45">
+          {previewElements.concat(resultElement).map((element, index) => (
+            <span
+              className="grid size-12 place-items-center rounded-md border border-zinc-300 bg-white text-xl"
+              key={`${element}-ghost-${index}`}
+            >
+              {element}
+            </span>
+          ))}
+        </div>
+      ) : null}
     </button>
   );
 }

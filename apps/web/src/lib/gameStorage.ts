@@ -6,7 +6,8 @@ export type GameStorageKind =
   | "board"
   | "darkMode"
   | "consumeInputs"
-  | "dpoTestMode";
+  | "dpoTestMode"
+  | "combinerModel";
 
 const GAME_STORAGE_VERSION = "v2";
 

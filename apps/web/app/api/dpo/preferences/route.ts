@@ -46,7 +46,7 @@ function isDpoPreferenceRequest(
       value.inventorySnapshot.every(isElementToken) &&
       Number.isInteger(value.combinationIndex) &&
       value.combinationIndex > 0 &&
-      (value.source === "known_recipe" || value.source === "mock_model")
+      (value.source === "known_recipe" || value.source === "model_generated")
   );
 }
 

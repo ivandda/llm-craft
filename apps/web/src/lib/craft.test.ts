@@ -7,6 +7,8 @@ import {
   mergeInventory,
   normalizeConcept
 } from "@/lib/craft";
+import { buildAgentPlaybackInventory } from "@/lib/agentPlayback";
+import { requestCombination } from "@/lib/api";
 import { selectDpoCandidates } from "@/lib/dpo";
 import { GOAL_PRESET, getInitialInventoryForMode } from "@/lib/gameModes";
 import { createGameStorageKey } from "@/lib/gameStorage";
@@ -27,6 +29,10 @@ import {
 } from "@/lib/server/randomGoals";
 import type { GoalPathStep } from "@/lib/server/randomGoals";
 import { saveDpoPreference } from "@/lib/server/dpoPreferences";
+import { combineElementsWithDataset } from "@/lib/server/dbRecipes";
+import { runAgentGoalTest } from "@/lib/server/agentTestRunner";
+import { POST as combinePost } from "../../app/api/combine/route";
+import type { GoalPreset } from "@/lib/types";
 
 const dbMock = vi.hoisted(() => {
   type UserRow = {
@@ -51,6 +57,13 @@ const dbMock = vi.hoisted(() => {
     input_b: string;
     output: string;
   };
+  type StoredRecipeRow = {
+    dataset_name: string;
+    output: string;
+    rationale: string | null;
+    rank: number;
+    raw_candidate?: unknown;
+  };
   type DpoPreferenceRow = {
     id: string;
     user_id: string;
@@ -71,7 +84,11 @@ const dbMock = vi.hoisted(() => {
   const sessions = new Map<string, string>();
   const leaderboard = new Map<string, LeaderboardRow>();
   const recipeRows: RecipeRow[] = [];
+  const storedRecipeRows: StoredRecipeRow[] = [];
   const dpoPreferenceEvents: DpoPreferenceRow[] = [];
+  const generatedCandidates: unknown[] = [];
+  const generatedDatasetImports: unknown[] = [];
+  const generatedPairs: unknown[] = [];
 
   async function query(sql: string, params: unknown[] = []) {
     const normalizedSql = sql.toLowerCase().replace(/\s+/g, " ");
@@ -114,7 +131,26 @@ const dbMock = vi.hoisted(() => {
       normalizedSql.includes("from recipe_pairs") &&
       normalizedSql.includes("join recipe_candidates")
     ) {
+      if (normalizedSql.includes("select rp.dataset_name")) {
+        return { rows: storedRecipeRows };
+      }
+
       return { rows: recipeRows };
+    }
+
+    if (normalizedSql.includes("insert into dataset_imports")) {
+      generatedDatasetImports.push(params);
+      return { rows: [] };
+    }
+
+    if (normalizedSql.includes("insert into recipe_pairs")) {
+      generatedPairs.push(params);
+      return { rows: [{ pair_id: params[0] }] };
+    }
+
+    if (normalizedSql.includes("insert into recipe_candidates")) {
+      generatedCandidates.push(params);
+      return { rows: [] };
     }
 
     if (normalizedSql.includes("insert into dpo_preference_events")) {
@@ -221,12 +257,22 @@ const dbMock = vi.hoisted(() => {
       sessions.clear();
       leaderboard.clear();
       recipeRows.splice(0);
+      storedRecipeRows.splice(0);
       dpoPreferenceEvents.splice(0);
+      generatedCandidates.splice(0);
+      generatedDatasetImports.splice(0);
+      generatedPairs.splice(0);
     },
     setRecipeRows(rows: RecipeRow[]) {
       recipeRows.splice(0, recipeRows.length, ...rows);
     },
+    setStoredRecipeRows(rows: StoredRecipeRow[]) {
+      storedRecipeRows.splice(0, storedRecipeRows.length, ...rows);
+    },
     dpoPreferenceEvents,
+    generatedCandidates,
+    generatedDatasetImports,
+    generatedPairs,
     transaction: vi.fn(async (callback) => callback({ query }))
   };
 });
@@ -253,9 +299,32 @@ function replayGoalPath(
   return target;
 }
 
+function createAgentGoal(targetName: string, minDepth = 2): GoalPreset {
+  return {
+    id: `agent-test-${targetName}`,
+    mode: "goal",
+    title: `Agent ${targetName}`,
+    description: "Agent test goal.",
+    objective: `Discover ${targetName}.`,
+    target: createElementToken(targetName),
+    metadata: {
+      difficulty: `depth-${minDepth}`,
+      status: "generated",
+      depth: minDepth,
+      minDepth,
+      strategy: "test",
+      initialInventoryId: "classic"
+    },
+    initialInventory: BASE_ELEMENTS
+  };
+}
+
 describe("craft utilities", () => {
   beforeEach(() => {
     dbMock.reset();
+    vi.unstubAllGlobals();
+    delete process.env.VERTEX_API_KEY;
+    delete process.env.VERTEX_MODEL;
   });
 
   it("normalizes concept names", () => {
@@ -279,19 +348,348 @@ describe("craft utilities", () => {
     expect(response.knownOutputs?.map((element) => element.name)).toContain("mist");
   });
 
-  it("returns a deterministic mock result for unknown pairs", () => {
+  it("requires the server model for unknown local pairs", () => {
     const request = {
       inputA: createElementToken("tree"),
       inputB: createElementToken("cloud"),
       inventory: BASE_ELEMENTS
     };
 
-    const firstResponse = combineElements(request);
-    const secondResponse = combineElements(request);
+    expect(() => combineElements(request)).toThrow(
+      "Unknown combinations must be resolved by the server model"
+    );
+  });
 
-    expect(firstResponse.source).toBe("mock_model");
-    expect(firstResponse.result.name).toMatch(/^combined_/);
-    expect(firstResponse.result).toEqual(secondResponse.result);
+  it("returns stored dataset recipes before generating", async () => {
+    dbMock.setStoredRecipeRows([
+      {
+        dataset_name: "final-10k",
+        output: "steam",
+        rationale: "fire heats water into steam",
+        rank: 1
+      }
+    ]);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await combineElementsWithDataset({
+      inputA: createElementToken("water"),
+      inputB: createElementToken("fire"),
+      inventory: BASE_ELEMENTS
+    });
+
+    expect(response.source).toBe("known_recipe");
+    expect(response.result.name).toBe("steam");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps final-10k recipes deterministic when a model is selected", async () => {
+    dbMock.setStoredRecipeRows([
+      {
+        dataset_name: "final-10k",
+        output: "steam",
+        rationale: "fire heats water into steam",
+        rank: 1
+      }
+    ]);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await combineElementsWithDataset({
+      inputA: createElementToken("water"),
+      inputB: createElementToken("fire"),
+      inventory: BASE_ELEMENTS,
+      model: "gemini-2.5-pro"
+    });
+
+    expect(response.source).toBe("known_recipe");
+    expect(response.model).toBeUndefined();
+    expect(response.result.name).toBe("steam");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects unknown combine models at the API boundary", async () => {
+    const response = await combinePost(
+      new Request("http://localhost/api/combine", {
+        method: "POST",
+        body: JSON.stringify({
+          inputA: createElementToken("water"),
+          inputB: createElementToken("fire"),
+          inventory: BASE_ELEMENTS,
+          model: "unknown-model"
+        })
+      })
+    );
+
+    expect(response.status).toBe(400);
+  });
+
+  it("generates and stores missing dataset recipes with Vertex", async () => {
+    process.env.VERTEX_API_KEY = "test-key";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    text: JSON.stringify({
+                      name: "storm cloud",
+                      emoji: "⛈️",
+                      rationale: "tree moisture and cloud air gather into a storm cloud"
+                    })
+                  }
+                ]
+              }
+            }
+          ]
+        })
+      }))
+    );
+
+    const response = await combineElementsWithDataset({
+      inputA: createElementToken("tree"),
+      inputB: createElementToken("cloud"),
+      inventory: BASE_ELEMENTS
+    });
+
+    expect(response.source).toBe("model_generated");
+    expect(response.result.name).toBe("storm cloud");
+    expect(response.result.emoji).toBe("⛈️");
+    expect(response.model).toBe("gemini-2.5-flash");
+    expect(dbMock.generatedCandidates).toHaveLength(1);
+  });
+
+  it("passes the selected combine model to Vertex", async () => {
+    process.env.VERTEX_API_KEY = "test-key";
+    let capturedUrl = "";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        capturedUrl = url;
+        return {
+          ok: true,
+          json: async () => ({
+            candidates: [
+              {
+                content: {
+                  parts: [
+                    {
+                      text: JSON.stringify({
+                        name: "signal mist",
+                        emoji: "*",
+                        rationale: "cloud and tree make a signal mist"
+                      })
+                    }
+                  ]
+                }
+              }
+            ]
+          })
+        };
+      })
+    );
+
+    const response = await combineElementsWithDataset({
+      inputA: createElementToken("tree"),
+      inputB: createElementToken("cloud"),
+      inventory: BASE_ELEMENTS,
+      model: "gemini-2.5-flash-lite"
+    });
+
+    expect(response.model).toBe("gemini-2.5-flash-lite");
+    expect(capturedUrl).toContain("gemini-2.5-flash-lite");
+  });
+
+  it("uses Pro combine generation settings without zero thinking budget", async () => {
+    process.env.VERTEX_API_KEY = "test-key";
+    const signal = new AbortController().signal;
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout").mockReturnValue(signal);
+    let capturedBody: unknown;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init: RequestInit) => {
+        capturedBody = JSON.parse(String(init.body));
+        return {
+          ok: true,
+          json: async () => ({
+            candidates: [
+              {
+                content: {
+                  parts: [
+                    {
+                      text: JSON.stringify({
+                        name: "ancient grove",
+                        emoji: "*",
+                        rationale: "tree and cloud age into an ancient grove"
+                      })
+                    }
+                  ]
+                }
+              }
+            ]
+          })
+        };
+      })
+    );
+
+    try {
+      const response = await combineElementsWithDataset({
+        inputA: createElementToken("tree"),
+        inputB: createElementToken("cloud"),
+        inventory: BASE_ELEMENTS,
+        model: "gemini-2.5-pro"
+      });
+
+      expect(response.model).toBe("gemini-2.5-pro");
+      expect(timeoutSpy).toHaveBeenCalledWith(45_000);
+      expect(capturedBody).toMatchObject({
+        generationConfig: {
+          maxOutputTokens: 1024,
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: "object",
+            properties: {
+              name: { type: "string" },
+              emoji: { type: "string" },
+              rationale: { type: "string" }
+            },
+            required: ["name", "emoji", "rationale"]
+          }
+        }
+      });
+      expect(
+        (capturedBody as { generationConfig: { thinkingConfig?: unknown } })
+          .generationConfig.thinkingConfig
+      ).toBeUndefined();
+    } finally {
+      timeoutSpy.mockRestore();
+    }
+  });
+
+  it("stores generated recipes in a model-specific dataset", async () => {
+    process.env.VERTEX_API_KEY = "test-key";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    text: JSON.stringify({
+                      name: "storm archive",
+                      emoji: "*",
+                      rationale: "tree and cloud preserve storm traces"
+                    })
+                  }
+                ]
+              }
+            }
+          ]
+        })
+      }))
+    );
+
+    await combineElementsWithDataset({
+      inputA: createElementToken("tree"),
+      inputB: createElementToken("cloud"),
+      inventory: BASE_ELEMENTS,
+      model: "gemini-2.5-pro"
+    });
+
+    expect(dbMock.generatedDatasetImports[0]).toEqual([
+      "web-generated-gemini-2.5-pro",
+      "apps/web",
+      JSON.stringify({
+        source: "vertex-web-combinator",
+        model: "gemini-2.5-pro"
+      })
+    ]);
+    expect((dbMock.generatedPairs[0] as unknown[])[1]).toBe(
+      "web-generated-gemini-2.5-pro"
+    );
+    expect(
+      JSON.parse((dbMock.generatedCandidates[0] as unknown[])[4] as string).model
+    ).toBe("gemini-2.5-pro");
+  });
+
+  it("serializes the selected model in combination requests", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => ({
+      ok: true,
+      json: async () => ({
+        result: createElementToken("steam"),
+        source: "known_recipe"
+      })
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await requestCombination({
+      inputA: createElementToken("water"),
+      inputB: createElementToken("fire"),
+      inventory: BASE_ELEMENTS,
+      model: "gemini-2.5-pro"
+    });
+
+    const requestInit = fetchMock.mock.calls[0][1] as RequestInit;
+
+    expect(JSON.parse(String(requestInit.body))).toMatchObject({
+      model: "gemini-2.5-pro"
+    });
+  });
+
+  it("uses a visible fallback emoji when Vertex omits one", async () => {
+    process.env.VERTEX_API_KEY = "test-key";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    text: JSON.stringify({
+                      name: "mystery signal",
+                      emoji: null,
+                      rationale: "cloud and tree form a strange signal"
+                    })
+                  }
+                ]
+              }
+            }
+          ]
+        })
+      }))
+    );
+
+    const response = await combineElementsWithDataset({
+      inputA: createElementToken("tree"),
+      inputB: createElementToken("cloud"),
+      inventory: BASE_ELEMENTS
+    });
+
+    expect(response.source).toBe("model_generated");
+    expect(response.result.name).toBe("mystery signal");
+    expect(response.result.emoji).toBe("🤖");
+  });
+
+  it("fails unknown dataset recipes when Vertex is not configured", async () => {
+    await expect(
+      combineElementsWithDataset({
+        inputA: createElementToken("tree"),
+        inputB: createElementToken("cloud"),
+        inventory: BASE_ELEMENTS
+      })
+    ).rejects.toThrow(
+      "VERTEX_API_KEY or GOOGLE_APPLICATION_CREDENTIALS is not configured"
+    );
   });
 
   it("adds only new elements to inventory", () => {
@@ -300,6 +698,54 @@ describe("craft utilities", () => {
 
     expect(inventory).toHaveLength(BASE_ELEMENTS.length + 1);
     expect(unchangedInventory).toHaveLength(inventory.length);
+  });
+
+  it("reconstructs agent playback inventory from visible steps", () => {
+    const steps = [
+      {
+        index: 1,
+        inputA: createElementToken("water"),
+        inputB: createElementToken("fire"),
+        output: createElementToken("steam"),
+        source: "known_recipe" as const
+      },
+      {
+        index: 2,
+        inputA: createElementToken("steam"),
+        inputB: createElementToken("earth"),
+        output: createElementToken("geyser"),
+        source: "known_recipe" as const
+      }
+    ];
+
+    expect(buildAgentPlaybackInventory(BASE_ELEMENTS, steps, 0).map((item) => item.id)).toEqual(
+      BASE_ELEMENTS.map((item) => item.id)
+    );
+    expect(buildAgentPlaybackInventory(BASE_ELEMENTS, steps, 1).map((item) => item.id)).toContain(
+      "steam"
+    );
+    expect(buildAgentPlaybackInventory(BASE_ELEMENTS, steps, 2).map((item) => item.id)).toContain(
+      "geyser"
+    );
+  });
+
+  it("does not duplicate existing elements during agent playback", () => {
+    const inventory = buildAgentPlaybackInventory(
+      BASE_ELEMENTS,
+      [
+        {
+          index: 1,
+          inputA: createElementToken("water"),
+          inputB: createElementToken("fire"),
+          output: createElementToken("fire"),
+          source: "known_recipe"
+        }
+      ],
+      1
+    );
+
+    expect(inventory.filter((element) => element.id === "fire")).toHaveLength(1);
+    expect(inventory).toHaveLength(BASE_ELEMENTS.length);
   });
 
   it("namespaces storage keys by normalized user and mode", () => {
@@ -403,6 +849,19 @@ describe("craft utilities", () => {
     expect(firstGoal?.target.id).toBe(secondGoal?.target.id);
   });
 
+  it("generates random goals with an explicit seed", async () => {
+    dbMock.setRecipeRows([
+      { input_a: "water", input_b: "fire", output: "steam" },
+      { input_a: "earth", input_b: "water", output: "mud" }
+    ]);
+
+    const firstGoal = await generateRandomGoal(1, "seed-a");
+    const secondGoal = await generateRandomGoal(1, "seed-a");
+
+    expect(firstGoal.id).toBe(secondGoal.id);
+    expect(firstGoal.metadata.seed).toBe("seed-a");
+  });
+
   it("rejects invalid random goal depths", () => {
     expect(isValidGoalDepth(0)).toBe(false);
     expect(isValidGoalDepth(21)).toBe(false);
@@ -470,6 +929,239 @@ describe("craft utilities", () => {
       "hot spring"
     ]);
     expect(dbMock.dpoPreferenceEvents).toHaveLength(1);
+  });
+
+  it("limits agent tests to 20 combinations", async () => {
+    const combine = vi.fn(async () => ({
+      result: createElementToken("not the target"),
+      source: "known_recipe" as const,
+      knownOutputs: [createElementToken("not the target")]
+    }));
+
+    const report = await runAgentGoalTest(
+      { depth: 2 },
+      {
+        generateGoal: async () => createAgentGoal("target", 2),
+        planAction: async () => ({
+          inputA: "water",
+          inputB: "fire",
+          reason: "try a basic pair"
+        }),
+        combine
+      }
+    );
+
+    expect(report.requestedDepth).toBe(2);
+    expect(report.minDepth).toBe(2);
+    expect(report.maxCombinations).toBe(20);
+    expect(report.combinationsUsed).toBe(20);
+    expect(report.stopReason).toBe("budget_exhausted");
+    expect(combine).toHaveBeenCalledTimes(20);
+  });
+
+  it("stops an agent test when the target is reached", async () => {
+    const report = await runAgentGoalTest(
+      { depth: 2 },
+      {
+        generateGoal: async () => createAgentGoal("steam", 2),
+        planAction: async () => ({
+          inputA: "water",
+          inputB: "fire"
+        }),
+        combine: async () => ({
+          result: createElementToken("steam"),
+          source: "known_recipe",
+          knownOutputs: [createElementToken("steam")]
+        })
+      }
+    );
+
+    expect(report.success).toBe(true);
+    expect(report.stopReason).toBe("target_reached");
+    expect(report.combinationsUsed).toBe(1);
+  });
+
+  it("passes the selected model to the agent planner", async () => {
+    const seenModels: string[] = [];
+    const report = await runAgentGoalTest(
+      { depth: 2, model: "gemini-2.5-flash-lite" },
+      {
+        generateGoal: async () => createAgentGoal("steam", 2),
+        planAction: async (state) => {
+          seenModels.push(state.model);
+          return {
+            inputA: "water",
+            inputB: "fire"
+          };
+        },
+        combine: async () => ({
+          result: createElementToken("steam"),
+          source: "known_recipe",
+          knownOutputs: [createElementToken("steam")]
+        })
+      }
+    );
+
+    expect(report.model).toBe("gemini-2.5-flash-lite");
+    expect(seenModels).toEqual(["gemini-2.5-flash-lite"]);
+  });
+
+  it("accepts Gemini 2.5 Pro as an agent test model", async () => {
+    const report = await runAgentGoalTest(
+      { depth: 2, model: "gemini-2.5-pro" },
+      {
+        generateGoal: async () => createAgentGoal("steam", 2),
+        planAction: async () => ({
+          inputA: "water",
+          inputB: "fire",
+          reason: "try the known steam recipe"
+        }),
+        combine: async () => ({
+          result: createElementToken("steam"),
+          source: "known_recipe",
+          knownOutputs: [createElementToken("steam")]
+        })
+      }
+    );
+
+    expect(report.model).toBe("gemini-2.5-pro");
+    expect(report.success).toBe(true);
+  });
+
+  it("sends a structured action schema to Vertex for agent planning", async () => {
+    process.env.VERTEX_API_KEY = "test-key";
+    let capturedBody: unknown;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init: RequestInit) => {
+        capturedBody = JSON.parse(String(init.body));
+        return {
+          ok: true,
+          json: async () => ({
+            candidates: [
+              {
+                content: {
+                  parts: [
+                    {
+                      text: JSON.stringify({
+                        inputA: "water",
+                        inputB: "fire",
+                        reason: "known recipe for steam"
+                      })
+                    }
+                  ]
+                }
+              }
+            ]
+          })
+        };
+      })
+    );
+
+    const report = await runAgentGoalTest(
+      { depth: 2, model: "gemini-2.5-pro" },
+      {
+        generateGoal: async () => createAgentGoal("steam", 2),
+        combine: async () => ({
+          result: createElementToken("steam"),
+          source: "known_recipe",
+          knownOutputs: [createElementToken("steam")]
+        })
+      }
+    );
+
+    expect(report.success).toBe(true);
+    expect(capturedBody).toMatchObject({
+      generationConfig: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: "object",
+          properties: {
+            inputA: { type: "string" },
+            inputB: { type: "string" },
+            reason: { type: "string" }
+          },
+          required: ["inputA", "inputB", "reason"]
+        }
+      }
+    });
+    expect(
+      (capturedBody as { generationConfig: { thinkingConfig?: unknown } })
+        .generationConfig.thinkingConfig
+    ).toBeUndefined();
+  });
+
+  it("rejects empty structured agent actions before combining", async () => {
+    process.env.VERTEX_API_KEY = "test-key";
+    const combine = vi.fn(async () => ({
+      result: createElementToken("steam"),
+      source: "known_recipe" as const,
+      knownOutputs: [createElementToken("steam")]
+    }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    text: JSON.stringify({
+                      inputA: "",
+                      inputB: "fire",
+                      reason: "invalid empty input"
+                    })
+                  }
+                ]
+              }
+            }
+          ]
+        })
+      }))
+    );
+
+    const report = await runAgentGoalTest(
+      { depth: 2, model: "gemini-2.5-pro" },
+      {
+        generateGoal: async () => createAgentGoal("steam", 2),
+        combine
+      }
+    );
+
+    expect(report.success).toBe(false);
+    expect(report.stopReason).toBe("model_error");
+    expect(report.combinationsUsed).toBe(0);
+    expect(combine).not.toHaveBeenCalled();
+  });
+
+  it("rejects unknown agent test models", async () => {
+    await expect(
+      runAgentGoalTest(
+        { depth: 2, model: "unknown-model" },
+        {
+          generateGoal: async () => createAgentGoal("steam", 2)
+        }
+      )
+    ).rejects.toThrow("Invalid agent test model");
+  });
+
+  it("rejects agent actions outside the current inventory", async () => {
+    const report = await runAgentGoalTest(
+      { depth: 2 },
+      {
+        generateGoal: async () => createAgentGoal("steam", 2),
+        planAction: async () => ({
+          inputA: "water",
+          inputB: "missing"
+        })
+      }
+    );
+
+    expect(report.success).toBe(false);
+    expect(report.stopReason).toBe("invalid_action");
+    expect(report.combinationsUsed).toBe(0);
   });
 
   it("seeds admin credentials for database auth", async () => {

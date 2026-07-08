@@ -1,5 +1,7 @@
 import type {
   AuthUser,
+  AgentTestReport,
+  AgentTestRequest,
   CombineRequest,
   CombineResponse,
   DpoPreferenceRequest,
@@ -42,6 +44,17 @@ export async function requestRandomGoal(
   );
 
   return payload.goal;
+}
+
+export async function requestAgentTestRun(
+  request: AgentTestRequest
+): Promise<AgentTestReport> {
+  const payload = await requestJson<{ report: AgentTestReport }>(
+    "/api/agent-test/run",
+    request
+  );
+
+  return payload.report;
 }
 
 export async function requestDpoPreference(

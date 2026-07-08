@@ -410,12 +410,18 @@ RUN_SFT_SMOKE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run pytest tests/sft/test_sm
 
 ## Frontend
 
-La interfaz jugable vive en `apps/web` como una app Next.js preparada para conectar modelos más adelante mediante contratos mock tipados. Incluye registro/login mock con credenciales seeded `admin/admin`, menu de modos (`Sandbox` y `Goal`), metas alcanzables por profundidad con inventario inicial variable, controles internos para reiniciar o generar otra meta en `Goal`, `DPO test mode`, perfil con logros destacados y leaderboard mock para objetivos completados.
+La interfaz jugable vive en `apps/web` como una app Next.js. El combinador consulta recetas en Postgres y usa Vertex AI con `VERTEX_API_KEY` o `GOOGLE_APPLICATION_CREDENTIALS` para generar y guardar combinaciones nuevas cuando el par no existe en la base. `Sandbox` y `Goal` permiten elegir el modelo Gemini del combinador (`Gemini 2.5 Flash`, `Gemini 2.5 Pro` o `Gemini 2.5 Flash Lite`); esa seleccion solo aplica a combinaciones generadas por modelo, porque las recetas conocidas de `final-10k` siempre tienen prioridad para mantener resultados deterministas. Incluye registro/login mock con credenciales seeded `admin/admin`, menu de modos (`Sandbox`, `Goal` y `Agent Test`), metas alcanzables por profundidad con inventario inicial variable, controles internos para reiniciar o generar otra meta en `Goal`, un modo de prueba donde un agente usa el combinador hasta 20 mezclas, `DPO test mode`, perfil con logros destacados y leaderboard para objetivos completados.
 
 ```bash
 cd apps/web
 npm ci
 npm run dev
+```
+
+Para configurar Vertex en desarrollo:
+
+```bash
+cp .env.example .env.local
 ```
 
 Para validar el frontend:

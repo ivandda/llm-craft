@@ -75,28 +75,6 @@ const KNOWN_RECIPES: Record<string, KnownRecipe> = {
   }
 };
 
-const FALLBACK_PREFIXES = [
-  "quiet",
-  "pale",
-  "bright",
-  "dense",
-  "soft",
-  "sharp",
-  "silver",
-  "clear"
-];
-
-const FALLBACK_NOUNS = [
-  "matter",
-  "spark",
-  "trace",
-  "form",
-  "field",
-  "blend",
-  "echo",
-  "compound"
-];
-
 export function normalizeConcept(value: string): string {
   return value.trim().replace(/\s+/g, " ").toLowerCase();
 }
@@ -120,29 +98,21 @@ export function combineElements(request: CombineRequest): CombineResponse {
   const pairKey = makePairKey(request.inputA.name, request.inputB.name);
   const knownRecipe = KNOWN_RECIPES[pairKey];
 
-  if (knownRecipe) {
-    const knownOutputs = [
-      knownRecipe.output,
-      ...(knownRecipe.alternatives ?? [])
-    ];
-
-    return {
-      result: knownRecipe.output,
-      source: "known_recipe",
-      confidence: 0.98,
-      knownOutputs,
-      rationale: knownRecipe.rationale
-    };
+  if (!knownRecipe) {
+    throw new Error("Unknown combinations must be resolved by the server model");
   }
 
-  const fallback = createFallbackElement(pairKey);
+  const knownOutputs = [
+    knownRecipe.output,
+    ...(knownRecipe.alternatives ?? [])
+  ];
 
   return {
-    result: fallback,
-    source: "mock_model",
-    confidence: 0.42,
-    knownOutputs: [fallback],
-    rationale: "mock response reserved for the future model integration"
+    result: knownRecipe.output,
+    source: "known_recipe",
+    confidence: 0.98,
+    knownOutputs,
+    rationale: knownRecipe.rationale
   };
 }
 
@@ -163,21 +133,3 @@ export function mergeInventory(
   ].sort((left, right) => left.name.localeCompare(right.name));
 }
 
-function createFallbackElement(pairKey: string): ElementToken {
-  const hash = hashString(pairKey);
-  const prefix = FALLBACK_PREFIXES[hash % FALLBACK_PREFIXES.length];
-  const noun = FALLBACK_NOUNS[Math.floor(hash / 7) % FALLBACK_NOUNS.length];
-  const mockedName = `${prefix}_${noun}`;
-
-  return createElementToken(`combined_${mockedName}`);
-}
-
-function hashString(value: string): number {
-  let hash = 0;
-
-  for (let index = 0; index < value.length; index += 1) {
-    hash = (hash * 31 + value.charCodeAt(index)) >>> 0;
-  }
-
-  return hash;
-}
