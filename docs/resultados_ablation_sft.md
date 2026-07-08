@@ -24,8 +24,17 @@ archivo es el informe de resultados.
 - **El modelo entiende la tarea, pero le falta forma.** La cobertura exacta (7%) es baja,
   pero la semántica (34% top-1 / 51% any@k) es ~5× mayor: el conocimiento composicional
   está; el cuello de botella es la **verbosidad** y algunos **tokens corruptos**.
-- **El CCS (nuestra métrica de investigación) contradijo a cobertura** y por eso queda
-  como secundario/exploratorio, no decisorio.
+- **El CCS de embeddings contradijo a cobertura** y por eso queda como
+  secundario/exploratorio, no decisorio (es un proxy geométrico, no un juicio de
+  creatividad; ver §11.4).
+- **Nueva métrica de creatividad con juez LLM (§12), corrida completa.** Un juez fuerte
+  (Gemini 2.5 Pro, batch), sin ver las respuestas del teacher, separa **Validez**
+  (correcto) de **Creatividad** (correcto **y** nuevo). Sobre las 1263 recetas de
+  `soft_ce`: **Validez 83.3% top-1 / 96.8% any@k**, **Creatividad 53.6% / 76.9%**. Es
+  ~11× la cobertura exacta (7.3%): el modelo es mucho mejor de lo que el exact-match
+  sugería, y **más de la mitad de sus top-1 son descubrimientos** correctos fuera de la
+  lista del teacher. (Sonnet quedó descartado: la cuenta de créditos no puede comprar
+  Claude en Marketplace, §12.4.)
 
 ---
 
@@ -178,6 +187,12 @@ cu126 corre sobre la familia de driver R525+, que el driver 12.2 (R535) cumple (
 
 ### 5.4 CCS (secundaria / exploratoria)
 
+> ⚠️ **El CCS de esta tabla es un proxy geométrico de embeddings, NO un juicio de
+> creatividad.** Sus tres componentes (`plaus`, `novelty`, `diversity`) son distancias
+> coseno con `all-MiniLM-L6-v2`, sin ningún modelo que juzgue si la respuesta es
+> correcta. Ver el glosario (§11) para qué mide exactamente cada componente y sus
+> límites, y §12 para la métrica de creatividad basada en juez LLM que la reemplaza.
+
 | Modelo | CCS | plaus | novelty | diversity |
 |---|---|---|---|---|
 | `concept_set` | 0.324 | 0.780 | 0.304 | 0.887 |
@@ -299,6 +314,9 @@ decoding, y preferencia por el concepto canónico).
 1. **Barato y sin reentrenar — re-decodificar el ganador.** Correr `soft_ce` con
    `max_new_tokens≈12` y `repetition_penalty` más suave para ver si desaparecen los
    tokens corruptos y sube la cobertura exacta. Diagnóstico de una hora.
+1.b **Cerrar la métrica de creatividad con juez LLM** (§12): habilitar Anthropic en Model
+   Garden y correr la evaluación completa de `soft_ce` con Sonnet (~$5–8). Tubería ya
+   implementada (`src/eval/judge_creativity.py`) y validada en piloto.
 2. **DPO desde el adapter `soft_ce`** (alto impacto). Preferidos = `known_outputs`
    cortos/canónicos; rechazados = las muestras verbosas/corruptas del propio modelo. Ataca
    de frente brevedad + correctitud. La cuota A100=4 lo habilita en paralelo.
@@ -346,3 +364,228 @@ uv run --group vertex python -m src.sft.vertex_submit \
 ```
 
 El baseline base agrega `--no_adapter --close_think_prompt true --strip_think true`.
+
+---
+
+## 11. Glosario de métricas: qué mide cada una, pros y contras
+
+Este proyecto tiene **dos familias de métricas** que responden preguntas distintas:
+cobertura ("¿acertó a la respuesta esperada?") y creatividad ("¿es buena y nueva la
+respuesta?"). Ninguna sola alcanza; se leen juntas. Abajo, cada métrica con su
+definición operativa, sus pros y sus contras.
+
+### 11.1 Cobertura exacta — `top1/any@k` contra `known_outputs` / `canonical`
+
+- **Qué mide.** Fracción de recetas donde la muestra coincide *string a string*
+  (normalizada: minúsculas + espacios) con alguna salida conocida (`known`) o con la
+  principal (`canonical`). `top1` = la primera muestra; `any@k` = alguna de las 4.
+- **Pros.** Objetiva, determinista, gratis, reproducible al 100%, sin modelo de por
+  medio. Ideal para **elegir entre variantes** (fue la métrica decisoria de la ablation).
+- **Contras.** *Brutalmente estricta*: castiga sinónimos (`fax machine` ≠ `faxmachine`),
+  verbosidad (`lightning rod system` ≠ `lightning`) y respuestas correctas fuera de la
+  lista del teacher (`calcium phosphate`, mejor que el label). Subestima el desempeño
+  real (acá ~7% exacto vs ~80% de validez según el juez, §12). Depende de la calidad de
+  `known_outputs`.
+
+### 11.2 Cobertura semántica — coseno ≥ 0.75 (MiniLM)
+
+- **Qué mide.** Igual que la exacta, pero una muestra "acierta" si su embedding tiene
+  coseno ≥ umbral con algún `known_output`. Rescata sinónimos y paráfrasis.
+- **Pros.** Mucho más robusta que la exacta a la forma; barata (CPU) y determinista.
+  Buena para estimar "¿está cerca de una respuesta buena?".
+- **Contras.** El umbral es arbitrario (0.75) y mueve el resultado; los embeddings de
+  frase confunden *relacionado* con *correcto* (`fire` y `firefighter` están cerca sin
+  ser lo mismo). No verifica correctitud lógica, solo cercanía semántica.
+
+### 11.3 Verbosidad — media de palabras del top-1 y fracción ≤2 palabras
+
+- **Qué mide.** Cuán corto responde el modelo. La tarea premia conceptos de ≤2 palabras.
+- **Pros.** Diagnóstico directo del problema #1 (sobre-especificación). Trivial de
+  calcular, muy interpretable.
+- **Contras.** No es calidad: una respuesta corta puede ser incorrecta y una larga,
+  correcta. Es un *proxy de forma*, se lee junto a cobertura, no sola. Además el
+  post-proceso `max_concept_words=3` la recorta artificialmente.
+
+### 11.4 CCS y sus componentes — **proxy geométrico de embeddings** (§5.4)
+
+`C(x) = α·mean(qᵏ·n) + (1−α)·d`, con α=0.8, λ=2. Los tres componentes son **distancias
+coseno con `all-MiniLM-L6-v2`**, sin ningún juez:
+
+- **plausibility (`q`)** = 1 − dist(muestra, *centroide de los `known_outputs`*)/2.
+  "¿Qué tan cerca está la muestra del promedio de las respuestas buenas?"
+- **novelty (`n`)** — en estas corridas, `novelty_method=input_distance`: distancia coseno
+  media de la muestra a `input_a` y `input_b`, ÷2. "¿Qué tan lejos del *input* está?"
+  (NO mide novedad respecto al dataset).
+- **diversity (`d`)** = distancia coseno media entre las 4 muestras. "¿Qué tan variadas
+  entre sí son?"
+- **Pros.** Barato, sin llamadas a LLM; da una señal continua de forma/variedad; útil como
+  chequeo de cordura y para análisis exploratorio.
+- **Contras (por qué quedó como secundaria).** (1) **No verifica correctitud**: premió al
+  base por "novedad" cuando escupía `"Hmm the user"`. (2) `novelty` mide distancia al
+  *input*, que no es lo que entendemos por creatividad. (3) La ponderación (α=0.8, λ=2) y
+  el rango (~0.5 por construcción) hacen su valor absoluto poco interpretable. (4)
+  **Contradijo a cobertura** y la banda entre variantes fue ruido. ⇒ Sirve como
+  descriptor, no como veredicto de creatividad.
+
+### 11.5 Juez LLM — **Validez** y **Creatividad** (§12, la métrica "de verdad")
+
+- **Qué mide.** Un LLM fuerte juzga, sin ver las respuestas del teacher, si la salida es
+  un resultado *plausible* de combinar A+B. Se cruza con una comprobación determinista de
+  "¿está en el dataset?" para separar dos tasas:
+  - **Validez** = fracción correcta (esté o no en el dataset).
+  - **Creatividad** = fracción correcta **Y** nueva (fuera de `known_outputs`) = descubrimiento.
+- **Pros.** Es lo más cercano a un juicio humano de la tarea; acredita respuestas
+  correctas fuera de la lista del teacher (donde la cobertura es ciega); separa "correcto"
+  de "creativo" en dos ejes legibles; puede detectar que el alumno *superó* al teacher.
+- **Contras.** Cuesta dinero y tiempo (llamadas API); es *no determinista* (aunque temp=0
+  ayuda); su calidad depende del prompt/rúbrica y del modelo juez (debe ser **más fuerte
+  que el teacher** para ser fiable); puede tener sesgos (lenidad con la verbosidad — por
+  eso brevedad sigue siendo eje aparte). Se valida a mano sobre una muestra antes de
+  confiar en la corrida completa.
+
+### 11.6 Cómo leerlas juntas (resumen)
+
+| Pregunta | Métrica | Confianza |
+|---|---|---|
+| ¿Qué variante de loss elijo? | Cobertura exacta/semántica | alta (decisoria) |
+| ¿Está cerca de una buena respuesta? | Cobertura semántica | media |
+| ¿Responde en el formato correcto (corto)? | Verbosidad | alta (para forma) |
+| ¿Es correcta de verdad? | **Validez (juez)** | alta |
+| ¿Es correcta **y** nueva? | **Creatividad (juez)** | alta |
+| Descriptor barato de forma/variedad | CCS embeddings | baja (exploratoria) |
+
+---
+
+## 12. Creatividad con juez LLM (diseño, decisiones y metodología)
+
+La cobertura es ciega a la respuesta *correcta-pero-fuera-de-lista*. Cuando el alumno
+produce algo plausible que el teacher nunca listó (p. ej. `element+skull → calcium
+phosphate`, mejor que el label `bone`), la cobertura la puntúa 0. Esta métrica cierra ese
+hueco con un **juez LLM fuerte** (más fuerte que el teacher Gemini 2.5 Flash).
+
+### 12.1 Definición de creatividad (Boden): valor × novedad
+
+Un resultado es creativo si es **a la vez** *valioso/plausible* (un resultado sensato de
+combinar A+B) **y** *novedoso* (no obvio, no un eco del input, no la única respuesta
+trivial). La clave — y el error que hundió al CCS de embeddings — es que **la novedad solo
+cuenta si además es válida**: "fuera del dataset" a secas es ambiguo (puede ser un
+descubrimiento o simplemente estar mal). Por eso se **condiciona** la novedad a la validez.
+
+### 12.2 Dos ejes independientes
+
+| Eje | Fuente | Definición |
+|---|---|---|
+| **¿plausible?** | juez Claude/Gemini, **sin referencia** | "¿Es `<salida>` un resultado sensato de combinar A+B?" El juez **no ve** los `known_outputs`, así que no puede solo copiar coincidencias ni penalizar una respuesta válida no listada. |
+| **¿en el dataset?** | código determinista | ¿coincide con algún `known_output` (exacto normalizado **o** coseno ≥ 0.75)? |
+
+Cubetas por salida y tasas titulares (sobre N recetas, para top-1 y any@k):
+
+```
+invalid      = no plausible                    -> mal / malformado
+valid-known  = plausible Y en-dataset          -> correcto, pero no nuevo
+valid-novel  = plausible Y fuera-de-dataset    -> DESCUBRIMIENTO (correcto + nuevo)
+
+Validez    = (valid-known + valid-novel) / N   -> con qué frecuencia acierta
+Creatividad =  valid-novel / N                 -> con qué frecuencia acierta Y es nuevo
+```
+
+### 12.3 Decisiones de diseño (y por qué)
+
+1. **Reportar Validez y Creatividad por separado** (no colapsar en un número). No se pierde
+   información: se ve el trade-off correcto-vs-creativo explícito.
+2. **Validez sin referencia.** El juez no ve `known_outputs`, para no limitarse a sellar
+   coincidencias ni castigar respuestas válidas fuera de lista — esto es lo que permite
+   acreditar cuando el alumno supera al teacher. La pertenencia al dataset se decide aparte
+   en código.
+3. **Juez más fuerte que el teacher.** Un juez tan bueno como el teacher (Gemini 2.5 Flash)
+   no podría reconocer cuándo el alumno lo superó. Primera elección: **Claude Sonnet 4.5**
+   (proveedor independiente). **Bloqueado por facturación** (ver §12.4). Elección final:
+   **Gemini 2.5 Pro** vía **batch** (más fuerte que Flash, ~50% más barato que realtime).
+4. **Se juzga solo al ganador `soft_ce`.** Juzgar al base gastaría ~1263 llamadas para
+   confirmar ~0 (produce meta-texto). El base queda como piso conocido.
+5. **Se juzgan las 4 muestras por receta** en una llamada → top-1 y any@k gratis; se
+   deduplican las repetidas (colapso de modo) para no pagar de más.
+6. **Brevedad sigue como eje aparte.** El juez es (correctamente) *lene con la verbosidad*
+   — plausibilidad ≠ concisión. La brevedad se mide con el conteo de palabras (§11.3).
+
+### 12.4 Infraestructura y hallazgos de acceso (por qué Gemini y no Claude)
+
+- **Claude no está habilitado en el Model Garden de Vertex de este proyecto**: los modelos
+  Anthropic devuelven 404 en todas las regiones probadas (`us-central1`, `us-east5`,
+  `europe-west1`, `us-east1`) con "your project does not have access".
+- **Habilitar Anthropic falla por facturación.** Al intentar habilitarlo en Model Garden:
+  *"Upgrade to a full Billing Account to purchase on Marketplace — This product cannot be
+  purchased using a credit-based account."* La cuenta actual (créditos) no puede comprar
+  productos de Marketplace ⇒ Sonnet queda descartado sin una cuenta de facturación con
+  medio de pago registrado.
+- La **API de Batches de Anthropic (50% descuento) tampoco existe en el cliente Vertex** —
+  el SDK lanza `"The Batch API is not supported in the Vertex client yet"`.
+- **Decisión: Gemini 2.5 Pro por `google-genai`, en modo batch.** Es más fuerte que el
+  teacher (2.5 Flash), funciona hoy sin habilitaciones, y el **batch de Vertex** (job
+  `client.batches.create`, mismo patrón que el enriquecimiento del teacher) da ~50% de
+  descuento. El código soporta ambos jueces; el batch es Gemini-only (Claude no lo permite
+  en Vertex).
+
+### 12.5 Resultados (completo, 1263 recetas, `soft_ce`, juez Gemini 2.5 Pro en batch)
+
+| Métrica | Juez LLM | Cobertura exacta (referencia) | Cobertura semántica |
+|---|---|---|---|
+| **Validez** top-1 (correcto) | **0.833** | 0.073 | 0.337 |
+| **Validez** any@k | **0.968** | 0.143 | 0.511 |
+| **Creatividad** top-1 (correcto **y** nuevo) | **0.536** | — | — |
+| **Creatividad** any@k | **0.769** | — | — |
+
+Cubetas del top-1: **inválido 16.7%**, **válido-conocido 29.7%**, **válido-nuevo
+(descubrimiento) 53.6%**.
+
+**Lectura.**
+
+1. **El modelo acierta el 83% de las veces** (top-1) según un juez fuerte — vs 7% de
+   exact-match y 34% de cobertura semántica. El exact-match subcontaba ~11× por
+   verbosidad, sinónimos y respuestas correctas fuera de la lista del teacher.
+2. **Más de la mitad de los top-1 son descubrimientos** (correctos **y** fuera del
+   dataset): 53.6%. El alumno no memoriza la lista del teacher; produce composiciones
+   válidas nuevas (`castle wall+castle wall → castle fortress complex`,
+   `mold+smoke → penicillin smoke ring`).
+3. **Con 4 muestras, casi siempre hay una válida** (any@k 96.8%) y en el 77% hay al menos
+   un descubrimiento válido. Esto refuerza el valor de muestrear K y de un futuro DPO que
+   empuje la buena muestra al top-1.
+4. **El 16.7% inválido** es el techo de mejora inmediato: son los tokens corruptos y
+   fragmentos cortados (`'owl garden a'`, comillas sueltas) que el juez detecta bien —
+   atacables con decoding (más tokens, menos `repetition_penalty`) y/o DPO.
+
+El juez (Gemini 2.5 Pro, batch, temp=0) es más fuerte que el teacher (2.5 Flash) y
+juzga **sin ver** los `known_outputs`, así que acredita respuestas correctas fuera de la
+lista — justo donde la cobertura es ciega. Números en
+`gs://llm-craft-bucket/eval_outputs/judge_softce_gemini/{summary.json,judgments.jsonl}`.
+
+> ✅ **Corrida completa hecha.** Costo real: batch de 1263 recetas con Gemini 2.5 Pro,
+> dentro del presupuesto (< $20). Antecedente: el piloto n=20 dio 0.80/0.95 validez y
+> 0.50/0.70 creatividad — consistente con el completo.
+
+**Limitación del juez.** Es (correctamente) lene con la verbosidad: acepta como plausible
+`castle fortress complex` aunque la tarea premie el concepto corto. Por eso **Validez alta
+no contradice cobertura exacta baja** — miden cosas distintas (correcto vs correcto-y-en-
+formato-canónico). La brevedad se sigue leyendo con §11.3.
+
+### 12.6 Reproducción del juez
+
+```bash
+# Recomendado: Gemini 2.5 Pro en BATCH (~50% más barato). Sube requests a GCS, lanza un
+# BatchPredictionJob de Vertex, hace polling, baja y parsea los resultados.
+uv run --group vertex python -m src.eval.judge_creativity \
+  gs://llm-craft-bucket/eval_outputs/cu126_softce_test/predictions.jsonl \
+  --model gemini-2.5-pro --mode batch \
+  --gcs_staging gs://llm-craft-bucket/judge_batch --poll_seconds 30 \
+  --semantic_threshold 0.75 \
+  --output_dir gs://llm-craft-bucket/eval_outputs/judge_softce_gemini
+
+# Realtime (una llamada por receta, concurrente) — útil para pilotos rápidos.
+uv run --group vertex python -m src.eval.judge_creativity \
+  gs://llm-craft-bucket/eval_outputs/cu126_softce_test/predictions.jsonl \
+  --model gemini-2.5-pro --mode realtime --concurrency 8 --max_examples 20 \
+  --semantic_threshold 0.75
+
+# Sonnet (si algún día se habilita Anthropic con cuenta de pago): solo realtime, us-east5 auto.
+#   --model claude-sonnet-4-5@20250929 --mode realtime
+```
