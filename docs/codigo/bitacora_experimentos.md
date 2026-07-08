@@ -432,3 +432,42 @@ El plan original (ya ejecutado), para referencia:
 Comparación justa (apples-to-apples): los 4 modelos SFT responden **directo** (fueron
 supervisados solo sobre el concepto, sin thinking; se verificó en los outputs guardados),
 así que el baseline base también se evalúa en modo respuesta-directa.
+
+---
+
+## Métrica de creatividad con juez LLM (2026-07-08)
+
+Se implementó `src/eval/judge_creativity.py`: scorer **offline** que juzga
+`predictions.jsonl` con un LLM fuerte y reporta dos tasas separadas, **Validez**
+(correcto) y **Creatividad** (correcto **y** nuevo), para top-1 y any@k. Diseño y
+metodología completos en `docs/resultados_ablation_sft.md` §12; glosario de todas las
+métricas con pros/cons en §11.
+
+Decisiones (definidas con el usuario antes de correr):
+- Creatividad = **valor × novedad** (Boden); la novedad **solo cuenta si es válida**.
+- **Validez sin referencia**: el juez no ve `known_outputs`; la pertenencia al dataset se
+  decide aparte en código (exacto normalizado o coseno ≥ 0.75).
+- Juez **más fuerte que el teacher** (Gemini 2.5 Flash). Elegido: **Claude Sonnet 4.5**;
+  fallback validado: **Gemini 2.5 Pro**.
+- Se juzga solo al ganador `soft_ce`, las 4 muestras por receta (dedup del colapso de modo).
+
+Hallazgos de infra:
+- **Claude no está habilitado** en el Model Garden de Vertex del proyecto: 404 en todas
+  las regiones (`us-central1/us-east5/europe-west1/us-east1`). Habilitarlo **falla por
+  facturación**: la cuenta de créditos no puede comprar productos de Marketplace. ⇒ Sonnet
+  descartado.
+- La **Batch API de Anthropic tampoco existe en el cliente Vertex** (el SDK lo prohíbe).
+  Decisión final: **Gemini 2.5 Pro en batch** por `google-genai` (`--mode batch`, ~50% más
+  barato; mismo patrón que el enriquecimiento del teacher).
+
+Estado (completo):
+- 14 tests offline en `tests/eval/test_judge_creativity.py` (bucketing/agregación, builder
+  y parser de batch, normalización de estado del job; todo mockeado).
+- Smoke en vivo (batch, 20 recetas) validó el flujo `export→submit→poll→parse→score`.
+  Bug encontrado y corregido: el estado del job venía como enum (`JobState.JOB_STATE_*`),
+  no string — se normaliza en `_normalize_batch_state`.
+- **Corrida completa hecha (1263 recetas de `soft_ce`, batch):** **Validez 83.3% top-1 /
+  96.8% any@k, Creatividad 53.6% / 76.9%**; 53.6% de los top-1 son descubrimientos
+  (correctos y fuera de lista), 16.7% inválidos (tokens corruptos). Resultados en
+  `gs://llm-craft-bucket/eval_outputs/judge_softce_gemini/`. Detalle en
+  `resultados_ablation_sft.md` §12.5.
