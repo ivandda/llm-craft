@@ -440,7 +440,7 @@ así que el baseline base también se evalúa en modo respuesta-directa.
 Se implementó `src/eval/judge_creativity.py`: scorer **offline** que juzga
 `predictions.jsonl` con un LLM fuerte y reporta dos tasas separadas, **Validez**
 (correcto) y **Creatividad** (correcto **y** nuevo), para top-1 y any@k. Diseño y
-metodología completos en `docs/resultados_ablation_sft.md` §12; glosario de todas las
+metodología completos en `docs/resultados_sft.md` §12; glosario de todas las
 métricas con pros/cons en §11.
 
 Decisiones (definidas con el usuario antes de correr):
@@ -470,4 +470,4 @@ Estado (completo):
   96.8% any@k, Creatividad 53.6% / 76.9%**; 53.6% de los top-1 son descubrimientos
   (correctos y fuera de lista), 16.7% inválidos (tokens corruptos). Resultados en
   `gs://llm-craft-bucket/eval_outputs/judge_softce_gemini/`. Detalle en
-  `resultados_ablation_sft.md` §12.5.
+  `resultados_sft.md` §12.5.
