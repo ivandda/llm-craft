@@ -1,9 +1,10 @@
-# clustering — reglas por vector de relación
+# clustering — reglas por vector de relación o racionalización
 
 Testea si las reglas de combinación del juego (`a + b -> c`) se pueden descubrir
-sin supervisión con aritmética de embeddings, codificando cada tripleta como un
-vector de relación `r = emb(c) - (emb(a)+emb(b))/2` (DIFFVEC, Vylomova et al.
-2016; SeVeN, Espinosa-Anke y Schockaert 2018) y clusterizando esos vectores.
+sin supervisión clusterizando embeddings, con dos representaciones: el vector de
+relación `r = emb(c) - (emb(a)+emb(b))/2` (DIFFVEC, Vylomova et al. 2016; SeVeN,
+Espinosa-Anke y Schockaert 2018), y los embeddings del texto de la racionalización
+de cada tripleta.
 
 ## Resultados
 
@@ -34,7 +35,7 @@ Racionalizaciones (silhouette ~0.03 y ejemplos por cluster, bge):
 
     uv run python -m src.analysis.clustering.inspect_rationale_clusters --k 10
 
-Reusa `runs/analysis/rationale_emb.npy` si está; si no, recomputa los embeddings.
+El script reutiliza `runs/analysis/rationale_emb.npy` si existe; si no, recomputa los embeddings.
 
 ## Estructura
 
