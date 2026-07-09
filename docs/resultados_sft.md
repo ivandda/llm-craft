@@ -7,6 +7,32 @@ Documento de **resultados**: qué se evaluó, con qué métricas (cada una expli
 límites) y qué salió. El historial cronológico y los detalles de infraestructura están en
 `docs/codigo/bitacora_experimentos.md`.
 
+### La tarea (contexto mínimo)
+
+El proyecto destila **creatividad composicional** estilo *Infinite Craft* en un LLM chico:
+dado un par de conceptos de entrada, generar el concepto que resulta de combinarlos
+(`fire + water → steam`, `earth + fire → lava`). La unidad de datos es la **receta**: un
+par `(input_a, input_b)` con una o más **salidas** válidas.
+
+- **Modelo (student):** `Qwen/Qwen3-4B-Thinking-2507` fine-tuneado con **QLoRA** (adapters
+  LoRA en 4-bit). Es un modelo de razonamiento (emite `<think>…</think>`), pero se lo
+  supervisó **solo sobre el concepto final**, así que en inferencia responde directo.
+- **Teacher:** las salidas de cada receta las generó **Gemini 2.5 Flash** (un LLM más
+  grande) enriqueciendo los datos crudos del juego. De ahí salen los `known_outputs` (lista
+  de salidas plausibles) y el `canonical_output` (la principal) que usamos como referencia.
+- **Familia de loss (lo que varía la ablation):** cada receta trae **varios candidatos de
+  salida ponderados**, y la loss se parametriza por dos ejes independientes:
+  - **`candidate_weighting`** — cómo pesar los candidatos: `uniform` (todos igual) vs
+    `dataset` (con el peso que trae el dato).
+  - **`candidate_aggregation`** — cómo combinar la probabilidad de los candidatos:
+    `expected_logprob` (promedia la log-prob por candidato → "soft cross-entropy", empuja
+    a la respuesta *modal*) vs `logsumexp_prob` (log-sum-exp sobre el conjunto → "concept
+    set", reparte masa entre todos los candidatos válidos).
+
+  Las 4 combinaciones (2×2) se entrenaron con **datos, prompt y config idénticos**, variando
+  solo estos dos ejes ⇒ ablation controlada. Los alias `soft_ce`, `concept_set`, etc. nombran
+  cada celda (ver §2.1). **La pregunta del experimento:** ¿qué loss da el mejor modelo?
+
 ---
 
 ## 1. Resumen ejecutivo
@@ -81,8 +107,8 @@ Media de palabras del top-1 y fracción de ≤2 palabras (la tarea apunta a ≤2
 - **Contras:** no es calidad (corto puede ser incorrecto); se lee junto a cobertura, no sola.
 
 ### 3.4 CCS de embeddings *(exploratoria — es un PROXY, no un juicio)*
-`C = α·mean(qᵏ·n) + (1−α)·d`, α=0.8, λ=2. Los tres componentes son **distancias coseno**,
-sin ningún modelo que juzgue correctitud:
+`C = α·mean(q^λ · n) + (1−α)·d`, con α=0.8, λ=2. Los tres componentes son **distancias
+coseno**, sin ningún modelo que juzgue correctitud:
 - **plausibility (q):** cercanía de la muestra al *centroide de los `known_outputs`*.
 - **novelty (n):** distancia de la muestra a los dos *inputs* (NO respecto al dataset).
 - **diversity (d):** dispersión entre las 4 muestras.
