@@ -178,27 +178,37 @@ y diversidad, porque su baja plausibilidad (elevada al cuadrado, λ=2) lo hunde.
 
 ### 4.4 Juez LLM — Validez y Creatividad
 
-**Solo se juzgó `soft_ce`** (el ganador por cobertura). Gemini 2.5 Pro, batch, 1263 recetas:
+Juez Gemini 2.5 Pro, batch, 1263 recetas. Se juzgaron el **ganador** (`soft_ce`,
+`expected_logprob`) y el mejor `logsumexp` (`concept_set`) para probar si el **eje de
+agregación** —el que decidió la cobertura— también domina en la métrica del juez.
 
-| Métrica | Juez LLM | Cobertura exacta | Cobertura semántica |
+| Métrica | `soft_ce` (exp_logprob) | `concept_set` (logsumexp) | Cobertura exacta (soft_ce) |
 |---|---|---|---|
-| **Validez** top-1 (correcto) | **0.833** | 0.073 | 0.337 |
-| **Validez** any@k | **0.968** | 0.143 | 0.511 |
-| **Creatividad** top-1 (correcto **y** nuevo) | **0.536** | — | — |
-| **Creatividad** any@k | **0.769** | — | — |
+| **Validez** top-1 (correcto) | **0.833** | 0.757 | 0.073 |
+| **Validez** any@k | **0.968** | 0.905 | 0.143 |
+| **Creatividad** top-1 (correcto **y** nuevo) | **0.536** | 0.518 | — |
+| **Creatividad** any@k | **0.769** | 0.721 | — |
+| inválido top-1 | **16.7%** | 24.3% | — |
 
-Cubetas del top-1: **inválido 16.7% · válido-conocido 29.7% · descubrimiento 53.6%**.
+Cubetas del top-1 (`soft_ce`): **inválido 16.7% · válido-conocido 29.7% · descubrimiento 53.6%**.
 
-1. **El modelo acierta el 83% top-1** según el juez — ~11× el exact-match (7.3%). El
-   exact-match subcontaba por verbosidad, sinónimos y respuestas correctas fuera de lista.
+1. **El modelo acierta el 83% top-1** (soft_ce) según el juez — ~11× el exact-match (7.3%).
+   El exact-match subcontaba por verbosidad, sinónimos y respuestas correctas fuera de lista.
 2. **53.6% de los top-1 son descubrimientos** (correctos y fuera del dataset): el alumno
    generaliza (`castle wall+castle wall → castle fortress complex`, `algae+algae → biofilm`).
 3. **Con 4 muestras casi siempre hay una válida** (any@k 96.8%; 76.9% con descubrimiento).
    Refuerza el valor de muestrear K y de un DPO que empuje la buena muestra al top-1.
-4. **El 16.7% inválido** (tokens cortados, `'owl garden a'`, comillas sueltas) es el techo
+4. **El eje de agregación se confirma en el juez.** `soft_ce` (expected_logprob) supera a
+   `concept_set` (logsumexp) en Validez (+7.6 pp top-1), any@k y limpieza (16.7% vs 24.3%
+   inválido). La creatividad top-1 está más pareja (0.536 vs 0.518) pero soft_ce lidera.
+   ⇒ El ganador por cobertura **también gana por el juez**; la conclusión "la agregación
+   manda" vale en las tres familias de métricas (cobertura, CCS corregido, juez).
+5. **El 16.7% inválido** (tokens cortados, `'owl garden a'`, comillas sueltas) es el techo
    de mejora inmediato — atacable con decoding y/o DPO.
 
-Datos: `gs://llm-craft-bucket/eval_outputs/judge_softce_gemini/{summary,judgments}.jsonl`.
+Datos: `gs://llm-craft-bucket/eval_outputs/judge_{softce,concept_set}_gemini/`. *(Nota: 32
+recetas de `concept_set` (2.5%) no parsearon y se cuentan como inválidas; su inválido real
+es ~2 pp menor, no cambia la conclusión.)*
 
 ---
 
@@ -247,12 +257,14 @@ sino en control de forma.**
 
 ## 7. Limitaciones
 
-- **Creatividad medida solo en el ganador** (`soft_ce`). No hay comparación de creatividad
-  entre variantes: para eso habría que juzgar al menos `concept_set` (el mejor `logsumexp`)
-  y ver si el eje de agregación también domina en la métrica del juez.
+- **Creatividad medida en 2 de 4 variantes** (`soft_ce` y `concept_set`), elegidas para
+  probar el eje de agregación. Las dos variantes `uniform` no se juzgaron: solo mueven el
+  eje de *weighting*, que ya es de segundo orden en cobertura y CCS, así que aportarían
+  poca información nueva.
 - **Un solo juez, sin intervalos de confianza.** Gemini 2.5 Pro es de la misma familia que
   el teacher (2.5 Flash); un 2º juez o un chequeo humano sobre ~30 casos daría más rigor.
-  El juez es lene con la verbosidad (por eso brevedad va aparte).
+  El juez es lene con la verbosidad (por eso brevedad va aparte). En `concept_set`, 32
+  recetas (2.5%) no parsearon y se contaron como inválidas.
 - **Labels ruidosos:** algunos `known_outputs` del teacher son raros (`bones+rope →
   "needleandthread"`), así que el exact-match subestima aún más.
 - **`max_new_tokens=8`** probablemente causa parte de los tokens cortados; no se probó mayor.
@@ -263,14 +275,12 @@ sino en control de forma.**
 
 ## 8. Próximos pasos
 
-1. **(Opcional) Juzgar `concept_set`** para cerrar la comparación de creatividad en el eje
-   que importa (agregación). ~$7 en batch.
-2. **DPO desde `soft_ce`** (alto impacto). Preferidos = `known_outputs` cortos/canónicos;
+1. **DPO desde `soft_ce`** (alto impacto). Preferidos = `known_outputs` cortos/canónicos;
    rechazados = las muestras verbosas/corruptas del propio modelo. Ataca de frente brevedad
    + correctitud, y el any@k 96.8% dice que la buena muestra ya existe: falta rankearla top-1.
-3. **Re-decodificar el ganador** (`max_new_tokens≈12`, `repetition_penalty` más suave) para
+2. **Re-decodificar el ganador** (`max_new_tokens≈12`, `repetition_penalty` más suave) para
    ver cuánto del 16.7% inválido es artefacto de decoding. Barato, sin reentrenar.
-4. **Higiene de datos:** recortar `known_outputs` a ≤2 palabras para alinear target y métrica.
+3. **Higiene de datos:** recortar `known_outputs` a ≤2 palabras para alinear target y métrica.
 
 ---
 
