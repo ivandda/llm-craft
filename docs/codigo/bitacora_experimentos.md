@@ -478,3 +478,42 @@ Estado (completo):
   (correctos y fuera de lista), 16.7% inválidos (tokens corruptos). Resultados en
   `gs://llm-craft-bucket/eval_outputs/judge_softce_gemini/`. Detalle en
   `resultados_sft.md` §12.5.
+
+---
+
+## DPO desde soft_ce (2026-07-09)
+
+Objetivo: convertir el conocimiento latente de `soft_ce` (any@k Validez 96.8% del juez) en
+top-1 corto y correcto — atacar ranking/forma, no conocimiento. Código en la rama
+`feature/dpo-softce` (`src/sft/dpo.py`, `src/data/build_dpo_pairs.py`, costuras en
+`config.py`/`trainer.py` vía `objective: sft|dpo`). Diseño en `resultados_sft.md` §9.2.
+
+**Decisiones de diseño (críticas):**
+- Reference = el propio `soft_ce` (init_adapter_path + logprobs precomputados una vez), NO
+  `disable_adapter()` (que daría el base y desharía el SFT).
+- `rejected` = muestras CRUDAS on-policy (build_dpo_pairs genera las suyas; los
+  `sampled_outputs` del eval están post-procesados y no sirven).
+- Máscara de completion hasta EOS (penalizar la cola verbosa).
+- `dpo_length_normalize=true`: clave para no degenerar (pares con asimetría chosen ~1.2 vs
+  rejected ~8 palabras).
+
+**Baches del camino (honestos):**
+- Re-decode de `soft_ce` (max_new_tokens=16, rep_pen=1.05): NO ayuda (§9.1) — el 16.7%
+  inválido es del modelo.
+- Gen de pares v1: corrió 2h en silencio (sin logging) → cortada. Fix: batching de prompts
+  (left-padding) + logging de progreso. Lección guardada: armar poll/Monitor y loguear desde
+  el arranque de todo job remoto.
+- v2 (max_new_tokens=24): rejected = rambles de 17 palabras (el modelo divaga si lo dejás) →
+  asimetría de longitud peligrosa. v3 (max_new_tokens=12): rejected ~8 palabras, mejor.
+- DPO falló 1 vez por un split train/dev sin newline final (JSONDecodeError) → arreglado.
+
+**Entrenamiento:** QLoRA, β=0.1, lora_dropout=0, 1 época (~225 steps) sobre 1799 pares +
+200 dev, length-normalized. Convergió muy rápido (loss→0, reward_margin→~5.5, reward_acc=1.0
+en <100 steps) — pares trivialmente separables; el length-norm + ancla evitaron degeneración.
+Run: `runs/2026-07-09_0641_qwen3_4b_dpo_softce`.
+
+**Resultado (test completo 1263, misma decodificación que la ablation):**
+**cobertura exacta top1_known 7.3%→42.2% (×5.8)**, any@k 14.3%→56.7%, top1_sem 33.7%→52.8%,
+**≤2 palabras 40.9%→100%**, media palabras 2.50→1.08, **empty_top1=0** (sin degenerar).
+Predicciones en `gs://llm-craft-bucket/eval_outputs/cu126_dpo_test/`. Juez LLM sobre el DPO:
+pendiente/en curso.
