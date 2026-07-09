@@ -153,17 +153,26 @@ Creatividad =  valid-novel / N                 -> con qué frecuencia acierta Y 
 
 ### 4.3 CCS de embeddings *(proxy — ver §3.4)*
 
-| Modelo | CCS | plaus | novelty | diversity |
-|---|---|---|---|---|
-| `concept_set` | 0.324 | 0.780 | 0.304 | 0.887 |
-| `concept_set_uniform` | 0.321 | 0.776 | 0.306 | 0.877 |
-| `soft_ce` | 0.318 | 0.786 | 0.303 | 0.850 |
-| `ce_uniform` | 0.313 | 0.781 | 0.301 | 0.841 |
-| base | 0.284 | 0.600 | 0.409 | 0.829 |
+> 🐛 **Corrección de un bug de signo en `diversity`.** El término `diversity_score` estaba
+> como `1 − d/2` (premiaba que las muestras fueran *parecidas*, lo opuesto a "diversidad").
+> Se corrigió a `d/2` (alto = más variado) en `creativity.py`. La tabla muestra los valores
+> **corregidos**, recalculados por-receta desde los `predictions.jsonl` guardados (exacto,
+> sin re-generar). Los `summary.json` históricos en GCS tienen los valores viejos (buggy).
 
-El CCS **contradice** a cobertura (rankea `concept_set` primero, premiando diversidad sin
-verificar correctitud) y su banda entre variantes (0.313–0.324) es ruido. Confirma que es
-un descriptor, no un criterio.
+| Modelo | CCS (corregido) | plaus | novelty | diversity |
+|---|---|---|---|---|
+| **`soft_ce`** | **0.178** | 0.786 | 0.303 | 0.150 |
+| `ce_uniform` | 0.177 | 0.781 | 0.301 | 0.159 |
+| `concept_set_uniform` | 0.171 | 0.776 | 0.306 | 0.123 |
+| `concept_set` | 0.169 | 0.780 | 0.304 | 0.113 |
+| base | 0.152 | 0.600 | 0.409 | 0.171 |
+
+Con la diversidad bien orientada, **el CCS ahora coincide con cobertura**: las variantes de
+`expected_logprob` (`soft_ce`, `ce_uniform`) lideran. La conclusión previa "el CCS
+contradice a cobertura" era **un artefacto del bug**. Aun así la banda entre las 4 celdas
+(0.169–0.178) es angosta, así que el CCS sigue siendo un descriptor débil, no un criterio:
+el veredicto de calidad lo da el juez (§4.4). El `base` queda último pese a su alta novedad
+y diversidad, porque su baja plausibilidad (elevada al cuadrado, λ=2) lo hunde.
 
 ### 4.4 Juez LLM — Validez y Creatividad
 

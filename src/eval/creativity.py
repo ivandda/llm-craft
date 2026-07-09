@@ -91,7 +91,10 @@ def compute_creativity_components(
     plausibility_distances = centroid_cosine_distances(sample_embeddings, reference_embeddings)
     plausibility_scores = 1.0 - (plausibility_distances / 2.0)
     diversity_distance = mean_pairwise_distance(sample_embeddings)
-    diversity_score = 1.0 - (diversity_distance / 2.0)
+    # Diversity rewards VARIETY among the K samples: higher mean pairwise distance ->
+    # higher score. (Previously this was 1 - d/2, which rewarded agreement — the
+    # opposite of the documented "d = diversity" term in the CCS.)
+    diversity_score = diversity_distance / 2.0
     local_creativity = float(
         (
             alpha * ((plausibility_scores**lambda_penalty) * novelty_scores).mean()
