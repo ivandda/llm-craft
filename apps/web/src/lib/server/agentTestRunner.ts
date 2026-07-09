@@ -18,7 +18,8 @@ import type {
 import { randomUUID } from "crypto";
 
 const MAX_AGENT_COMBINATIONS = 20;
-const PRO_AGENT_REQUEST_TIMEOUT_MS = 45_000;
+const PRO_AGENT_REQUEST_TIMEOUT_MS = 18_000;
+const PRO_AGENT_THINKING_BUDGET = 1024;
 const AGENT_ACTION_RESPONSE_SCHEMA = {
   type: "object",
   properties: {
@@ -187,9 +188,9 @@ function buildAgentGenerationConfig(model: string) {
     responseSchema: AGENT_ACTION_RESPONSE_SCHEMA
   };
 
-  if (!model.includes("pro")) {
-    config.thinkingConfig = { thinkingBudget: 0 };
-  }
+  config.thinkingConfig = {
+    thinkingBudget: model.includes("pro") ? PRO_AGENT_THINKING_BUDGET : 0
+  };
 
   return config;
 }

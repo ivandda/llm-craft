@@ -9,6 +9,11 @@ import {
   requestRegister,
   type AuthSession
 } from "@/lib/api";
+import {
+  DEFAULT_VERTEX_MODEL,
+  isKnownVertexModel,
+  VERTEX_MODEL_OPTIONS
+} from "@/lib/agentModels";
 import { GOAL_PRESET } from "@/lib/gameModes";
 import {
   FEATURED_ACHIEVEMENT_LIMIT,
@@ -52,6 +57,9 @@ export function AppShell() {
   const [session, setSession] = useState<AuthSession | null>(null);
   const [selectedMode, setSelectedMode] = useState<GameMode | null>(null);
   const [goalDepth, setGoalDepth] = useState(3);
+  const [selectedCombinerModel, setSelectedCombinerModel] =
+    useState(DEFAULT_VERTEX_MODEL);
+  const [hasHydratedCombinerModel, setHasHydratedCombinerModel] = useState(false);
   const [activeGoalPreset, setActiveGoalPreset] = useState<GoalPreset>(GOAL_PRESET);
   const [snapshot, setSnapshot] = useState<GameSnapshot>(EMPTY_SNAPSHOT);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
@@ -66,6 +74,29 @@ export function AppShell() {
       .then((nextSession) => setSession(nextSession))
       .finally(() => setIsLoadingSession(false));
   }, []);
+
+  useEffect(() => {
+    if (!session) {
+      setHasHydratedCombinerModel(false);
+      return;
+    }
+
+    setSelectedCombinerModel(
+      readStoredModel(createCombinerModelStorageKey(session.user.id))
+    );
+    setHasHydratedCombinerModel(true);
+  }, [session?.user.id]);
+
+  useEffect(() => {
+    if (!session || !hasHydratedCombinerModel) {
+      return;
+    }
+
+    window.localStorage.setItem(
+      createCombinerModelStorageKey(session.user.id),
+      JSON.stringify(selectedCombinerModel)
+    );
+  }, [hasHydratedCombinerModel, selectedCombinerModel, session]);
 
   async function handleLogout() {
     await requestLogout();
@@ -136,8 +167,10 @@ export function AppShell() {
         goalDepth={goalDepth}
         goalGenerationMessage={goalGenerationMessage}
         isGeneratingGoal={isGeneratingGoal}
+        selectedCombinerModel={selectedCombinerModel}
         onGoalDepthChange={setGoalDepth}
         onLogout={handleLogout}
+        onCombinerModelChange={setSelectedCombinerModel}
         onOpenProfile={() => setIsProfileOpen(true)}
         onSelectMode={handleSelectMode}
       />
@@ -161,6 +194,7 @@ export function AppShell() {
       goalPreset={activeGoalPreset}
       goalDepth={goalDepth}
       goalGenerationMessage={goalGenerationMessage}
+      selectedCombinerModel={selectedCombinerModel}
       isGeneratingGoal={isGeneratingGoal}
       mode={selectedMode}
       user={session.user}
@@ -301,8 +335,10 @@ function ModeMenu({
   goalDepth,
   goalGenerationMessage,
   isGeneratingGoal,
+  selectedCombinerModel,
   user,
   onGoalDepthChange,
+  onCombinerModelChange,
   onLogout,
   onOpenProfile,
   onSelectMode
@@ -310,8 +346,10 @@ function ModeMenu({
   goalDepth: number;
   goalGenerationMessage: string | null;
   isGeneratingGoal: boolean;
+  selectedCombinerModel: string;
   user: AuthUser;
   onGoalDepthChange: (depth: number) => void;
+  onCombinerModelChange: (model: string) => void;
   onLogout: () => void;
   onOpenProfile: () => void;
   onSelectMode: (mode: GameMode) => void | Promise<void>;
@@ -381,6 +419,20 @@ function ModeMenu({
               ))}
             </select>
           </label>
+          <label className="flex min-w-[240px] items-center gap-3 text-sm font-semibold text-zinc-700">
+            <span>Combiner model</span>
+            <select
+              className="h-9 min-w-0 flex-1 rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-zinc-500"
+              onChange={(event) => onCombinerModelChange(event.target.value)}
+              value={selectedCombinerModel}
+            >
+              {VERTEX_MODEL_OPTIONS.map((model) => (
+                <option key={model.id} value={model.id}>
+                  {model.label}
+                </option>
+              ))}
+            </select>
+          </label>
           {goalGenerationMessage ? (
             <p className="text-sm text-amber-700">{goalGenerationMessage}</p>
           ) : null}
@@ -388,6 +440,29 @@ function ModeMenu({
       </div>
     </main>
   );
+}
+
+function createCombinerModelStorageKey(userId: string): string {
+  return `llm-craft.v2.${normalizeStorageSegment(userId)}.combinerModel`;
+}
+
+function readStoredModel(key: string): string {
+  const rawValue = window.localStorage.getItem(key);
+
+  if (!rawValue) {
+    return DEFAULT_VERTEX_MODEL;
+  }
+
+  try {
+    const model = JSON.parse(rawValue) as unknown;
+    return isKnownVertexModel(model) ? model : DEFAULT_VERTEX_MODEL;
+  } catch {
+    return DEFAULT_VERTEX_MODEL;
+  }
+}
+
+function normalizeStorageSegment(value: string): string {
+  return value.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "-") || "anonymous";
 }
 
 function ModeCard({

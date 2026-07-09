@@ -1030,6 +1030,8 @@ describe("craft utilities", () => {
 
   it("sends a structured action schema to Vertex for agent planning", async () => {
     process.env.VERTEX_API_KEY = "test-key";
+    const signal = new AbortController().signal;
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout").mockReturnValue(signal);
     let capturedBody: unknown;
     vi.stubGlobal(
       "fetch",
@@ -1058,37 +1060,39 @@ describe("craft utilities", () => {
       })
     );
 
-    const report = await runAgentGoalTest(
-      { depth: 2, model: "gemini-2.5-pro" },
-      {
-        generateGoal: async () => createAgentGoal("steam", 2),
-        combine: async () => ({
-          result: createElementToken("steam"),
-          source: "known_recipe",
-          knownOutputs: [createElementToken("steam")]
-        })
-      }
-    );
-
-    expect(report.success).toBe(true);
-    expect(capturedBody).toMatchObject({
-      generationConfig: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: "object",
-          properties: {
-            inputA: { type: "string" },
-            inputB: { type: "string" },
-            reason: { type: "string" }
-          },
-          required: ["inputA", "inputB", "reason"]
+    try {
+      const report = await runAgentGoalTest(
+        { depth: 2, model: "gemini-2.5-pro" },
+        {
+          generateGoal: async () => createAgentGoal("steam", 2),
+          combine: async () => ({
+            result: createElementToken("steam"),
+            source: "known_recipe",
+            knownOutputs: [createElementToken("steam")]
+          })
         }
-      }
-    });
-    expect(
-      (capturedBody as { generationConfig: { thinkingConfig?: unknown } })
-        .generationConfig.thinkingConfig
-    ).toBeUndefined();
+      );
+
+      expect(report.success).toBe(true);
+      expect(timeoutSpy).toHaveBeenCalledWith(18_000);
+      expect(capturedBody).toMatchObject({
+        generationConfig: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: "object",
+            properties: {
+              inputA: { type: "string" },
+              inputB: { type: "string" },
+              reason: { type: "string" }
+            },
+            required: ["inputA", "inputB", "reason"]
+          },
+          thinkingConfig: { thinkingBudget: 1024 }
+        }
+      });
+    } finally {
+      timeoutSpy.mockRestore();
+    }
   });
 
   it("rejects empty structured agent actions before combining", async () => {
