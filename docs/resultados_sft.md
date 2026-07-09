@@ -328,13 +328,55 @@ del modelo**, no del decoding. Confirma que DPO (no decoding) es el lever correc
 
 ### 9.2 DPO desde `soft_ce` (resultado principal)
 
-**Idea:** SFT solo ve ejemplos positivos; no puede empujar hacia abajo la salida verbosa/
-basura que el modelo rankea alto. DPO entrena sobre pares (chosen, rejected) y sube la
-respuesta corta/válida **por encima** de la propia salida mala del modelo — atacando el
-cuello de botella (ranking/forma) que el eval del juez había identificado (any@k Validez 96.8%
-= el modelo ya sabe; falta que la buena muestra sea el top-1).
+#### Metodología e intuición (para leer en frío)
 
-**Setup:**
+**Qué es DPO y por qué acá.** SFT (lo que hicimos hasta §8) solo ve ejemplos **positivos**:
+maximiza la probabilidad del target. Nunca ve qué es una respuesta *mala*, así que **no puede
+empujar hacia abajo** la salida verbosa/basura que el modelo ya rankea alto. **DPO** (Direct
+Preference Optimization) entrena sobre **pares `(chosen, rejected)`** y sube la probabilidad de
+`chosen` **relativa a** `rejected` — agrega la señal negativa y de ranking que a SFT le falta.
+*Analogía:* SFT es mostrarle a un alumno solo ejemplos resueltos correctos; DPO es mostrarle
+"esta respuesta es mejor que esta otra" — le enseña a **discriminar/preferir**, que es lo que
+necesitás cuando el alumno ya sabe la materia pero elige mal la formulación. Es el tool correcto
+**para nosotros** porque el eval del juez mostró que el conocimiento **ya está** (any@k Validez
+96.8%): falta que la buena respuesta sea el **top-1**. DPO no crea conocimiento — reordena.
+
+**De dónde salen los pares, y por qué así:**
+- **`rejected` = las propias muestras malas del modelo (on-policy), no respuestas random.** El
+  gradiente de DPO es grande **donde el modelo hoy se equivoca** (rankea `rejected` por encima
+  de `chosen`) y ≈0 donde ya acierta. Un `rejected` random tiene probabilidad bajísima → no hay
+  nada que corregir → gradiente desperdiciado. Las propias salidas verbosas/basura son
+  justamente lo que el modelo rankea alto → ahí está la masa de probabilidad a redistribuir.
+  Por eso `build_dpo_pairs.py` **genera sus propias muestras crudas** del modelo (los
+  `sampled_outputs` del eval no sirven: están post-procesados/recortados).
+- **`chosen` = un concepto corto y válido.** Idealmente una muestra corta válida *on-policy*;
+  como el modelo **nunca** produjo una (over-genera siempre), se usó el **canónico corto del
+  dataset** (off-policy). Esto es correcto pero tiene un costo — ver §9.3: ancla al canónico ⇒
+  menos descubrimientos.
+- **Reglas, sin juez.** El objetivo es **forma** (brevedad + correctitud). El juez LLM es
+  (a propósito) *lene con la verbosidad* → sería el signal equivocado para brevedad, y costaría.
+  Las reglas (longitud + match string/semántico contra los candidatos) son gratis y directas.
+
+**Tres decisiones de diseño que evitan errores sutiles:**
+1. **Reference = el propio `soft_ce`, NO el modelo base.** DPO usa un modelo de referencia
+   congelado para no alejarse demasiado (término KL). Si la referencia fuera el *base*, DPO
+   regularizaría *hacia el base* y **desharía el SFT**. Solución: inicializar la política desde
+   el adapter `soft_ce` y **precomputar** los logprobs de referencia una vez desde esa misma
+   política (son constantes ⇒ un solo forward, sin 2ª copia en VRAM).
+2. **`dpo_length_normalize=true`.** Los pares tienen asimetría de longitud fuerte (chosen ~1.2
+   vs rejected ~8 palabras). Con logp *sumado*, la secuencia corta "gana" por ser corta → DPO
+   podría colapsar a "emitir EOS enseguida" (outputs vacíos). Normalizar el logp por longitud
+   compara **calidad por-token** y neutraliza ese sesgo. Resultado: **empty_top1 = 0**.
+3. **La máscara de la loss cubre la respuesta + EOS** (no solo el concepto), para penalizar la
+   cola verbosa y premiar el *cortar*.
+
+**Implementación (rama `feature/dpo-softce`, sin TRL):** se reusó el loop de training existente
+vía un branch `objective: sft|dpo`; la loss DPO son ~20 líneas sobre la primitiva de logprobs
+enmascarados que ya usaba el SFT (`causal_masked_logprobs`). Código: `src/sft/dpo.py`
+(loss, collator, dataset, precompute) + `src/data/build_dpo_pairs.py` (pares) + costuras en
+`config.py`/`trainer.py`. Todo con tests (loss, collator, reglas de pares, smoke train E2E).
+
+**Setup (config):**
 - Política inicializada desde el adapter `soft_ce`; **reference = el propio `soft_ce`**
   (logprobs precomputados una vez), NO el modelo base. QLoRA, `β=0.1`, `lora_dropout=0`,
   1 época sobre ~1799 pares, `dpo_length_normalize=true`.
