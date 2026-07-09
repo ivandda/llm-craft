@@ -32,7 +32,8 @@ def test_compute_creativity_components_uses_centroid_distance_for_plausibility()
     assert math.isclose(components.plausibility_score, 0.926776707, rel_tol=1e-6)
     assert math.isclose(components.novelty, 0.5, rel_tol=1e-6)
     assert math.isclose(components.diversity_distance, 0.292893231, rel_tol=1e-6)
-    assert math.isclose(components.diversity_score, 0.853553385, rel_tol=1e-6)
+    # diversity_score = diversity_distance / 2 (higher = more varied samples)
+    assert math.isclose(components.diversity_score, 0.146446615, rel_tol=1e-6)
     assert components.local_creativity > 0.0
 
 
