@@ -4,6 +4,7 @@ datasets/processed_old/*
 datasets/processed_no_expitau/*
 datasets/enriched/*
 runs/
+src/analysis/embeddings/
 DS_Store
 .DS_Store
 secrets/*
