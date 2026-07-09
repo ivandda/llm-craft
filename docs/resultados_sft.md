@@ -47,11 +47,13 @@ par `(input_a, input_b)` con una o más **salidas** válidas.
   composicional está; el cuello de botella es la **forma** (verbosidad, tokens cortados).
 - **Más de la mitad de sus respuestas son descubrimientos** (correctos **y** fuera de la
   lista del teacher): 53.6% top-1. El alumno generaliza, no memoriza.
-- **DPO arregló la forma (§9.2).** Partiendo de `soft_ce`, DPO sobre pares (respuesta corta
-  del dataset vs la propia salida verbosa del modelo) llevó la **cobertura exacta de 7.3% a
-  42.2% (×5.8)** y la brevedad a **100% ≤2 palabras**, sin degenerar (empty=0). Confirma la
-  tesis: el conocimiento estaba, faltaba ranking/forma — y la señal negativa de DPO (que a
-  SFT le falta) lo resolvió.
+- **DPO arregló la forma, con un trade-off (§9.2–9.3).** Partiendo de `soft_ce`, DPO sobre
+  pares (concepto corto del dataset vs la propia salida verbosa del modelo) llevó la
+  **cobertura exacta de 7.3% a 42.2% (×5.8)**, la brevedad a **100% ≤2 palabras**, y la
+  **Validez del juez de 83% a 95.5%** (inválido 16.7%→4.5%) — sin degenerar (empty=0). **Pero
+  bajó la Creatividad** (descubrimientos 53.6%→43.4%): al anclar al concepto canónico, el
+  modelo se volvió **más correcto/limpio pero menos explorador**. DPO no es un win puro; es
+  un modelo confiable a costa de novedad.
 
 ---
 
@@ -357,18 +359,47 @@ cuello de botella (ranking/forma) que el eval del juez había identificado (any@
 | media palabras (top-1) | 2.50 | **1.08** | — |
 | **empty_top1** | 0.000 | **0.000** | sin degeneración |
 
-**Lectura.** DPO **cuadruplicó-a-quintuplicó la cobertura exacta** (7.3%→42.2%) y **resolvió
-la verbosidad** (100% ≤2 palabras) sin degenerar (empty=0). Confirma la tesis del informe: el
-conocimiento composicional ya estaba en `soft_ce` (Validez 83% del juez, §4.4); lo que faltaba
-era **forma/ranking**, y DPO — con la señal negativa que a SFT le falta — lo convirtió en el
-top-1 corto y correcto. Ejemplos: `water+white→snow`, `glass+sky→telescope`,
-`lead+zebra→poisoned animal`, `pottery+steel→kiln`.
+**Lectura (cobertura).** DPO **cuadruplicó-a-quintuplicó la cobertura exacta** (7.3%→42.2%) y
+**resolvió la verbosidad** (100% ≤2 palabras) sin degenerar (empty=0). Confirma la tesis: el
+conocimiento composicional ya estaba en `soft_ce` (Validez 83% del juez); lo que faltaba era
+**forma/ranking**, y DPO — con la señal negativa que a SFT le falta — lo convirtió en el top-1
+corto y correcto. Ejemplos: `water+white→snow`, `glass+sky→telescope`, `pottery+steel→kiln`.
 
-**Limitaciones.** Convergencia muy rápida (loss→0, reward_margin→~5.5 en <100 steps) porque los
-pares son trivialmente separables; el `dpo_length_normalize` + ancla a `soft_ce` evitaron la
-degeneración, pero conviene un barrido de β/steps en el futuro. Falta el **juez LLM sobre el
-DPO** (Validez/Creatividad) para el cuadro completo. Código en la rama `feature/dpo-softce`
-(`src/sft/dpo.py`, `src/data/build_dpo_pairs.py`).
+### 9.3 Juez LLM sobre el DPO — el trade-off correcto/creativo
+
+Juzgado con el mismo protocolo que §4.4 (Gemini 2.5 Pro, batch, 1263, sin ver `known_outputs`):
+
+| Métrica (juez) | `soft_ce` | **DPO** | |
+|---|---|---|---|
+| **Validez** top-1 (correcto) | 0.833 | **0.955** | +12 pp |
+| **Validez** any@k | 0.968 | **0.989** | |
+| **inválido** top-1 | 16.7% | **4.5%** | basura casi eliminada |
+| valid-known top-1 | 29.7% | **52.1%** | |
+| **Creatividad** top-1 (correcto **y** nuevo) | **0.536** | 0.434 | −10 pp |
+| **Creatividad** any@k | **0.769** | 0.594 | |
+
+**El hallazgo más matizado del proyecto** — y justo lo que la métrica de dos ejes (§3.5) fue
+diseñada para revelar:
+- **DPO gana en Validez y limpieza:** correcto el **95.5%** (vs 83.3%), inválido **16.7%→4.5%**.
+  La basura/malformados casi desaparecen.
+- **DPO pierde Creatividad:** descubrimientos (correcto **y** fuera de lista) **53.6%→43.4%**.
+- **Por qué:** el `chosen` era el concepto **canónico corto del dataset**, así que DPO empujó
+  al modelo hacia las respuestas **conocidas** (valid-known 29.7%→**52.1%**) y lejos de las
+  novedosas. Cambió **descubrimiento por corrección/forma**. Esto también explica el ×5.8 en
+  cobertura exacta: el modelo ahora da la respuesta canónica, que es justo lo que el
+  exact-match premia.
+
+**Veredicto:** DPO **no es estrictamente "mejor"**: es un modelo **más correcto, más limpio y
+conciso**, a costa de ser **menos explorador**. La elección depende del objetivo (generador
+confiable vs creativo). Para conservar creatividad, el `chosen` debería ser un descubrimiento
+corto **on-policy** en vez del canónico — pero el modelo no produjo cortos válidos on-policy
+(over-genera), así que se usó el canónico. Es la principal dirección futura.
+
+**Limitaciones.** Convergencia muy rápida (loss→0, reward_margin→~5.5 en <100 steps: pares
+trivialmente separables); `dpo_length_normalize` + ancla a `soft_ce` evitaron la degeneración,
+pero conviene un barrido de β/steps. Un solo juez (mismo caveat que §3.5). Código y datos:
+rama `feature/dpo-softce`; resultados en `gs://llm-craft-bucket/eval_outputs/{cu126_dpo_test,
+judge_dpo_gemini}/`.
 
 ---
 

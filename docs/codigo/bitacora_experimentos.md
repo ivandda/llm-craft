@@ -515,5 +515,8 @@ Run: `runs/2026-07-09_0641_qwen3_4b_dpo_softce`.
 **Resultado (test completo 1263, misma decodificación que la ablation):**
 **cobertura exacta top1_known 7.3%→42.2% (×5.8)**, any@k 14.3%→56.7%, top1_sem 33.7%→52.8%,
 **≤2 palabras 40.9%→100%**, media palabras 2.50→1.08, **empty_top1=0** (sin degenerar).
-Predicciones en `gs://llm-craft-bucket/eval_outputs/cu126_dpo_test/`. Juez LLM sobre el DPO:
-pendiente/en curso.
+Predicciones en `gs://llm-craft-bucket/eval_outputs/cu126_dpo_test/`.
+
+**Juez LLM sobre el DPO (trade-off):** Validez top-1 **83.3%→95.5%** (inválido 16.7%→4.5%),
+pero Creatividad **53.6%→43.4%** — DPO ancló al concepto canónico ⇒ más correcto/limpio, menos
+explorador. Detalle en `resultados_sft.md` §9.3; datos en `eval_outputs/judge_dpo_gemini/`.
