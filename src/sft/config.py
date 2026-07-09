@@ -63,6 +63,16 @@ class SFTConfig:
     merge_duplicate_recipes: bool = True
     trust_remote_code: bool = False
     dataloader_num_workers: int = 0
+    # DPO (objective="dpo"). Reuses train_path/dev_path pointing at a DPO pairs.jsonl.
+    # See src/sft/dpo.py. The reference is the SFT policy itself (init_adapter_path),
+    # NOT the base model.
+    objective: str = "sft"  # "sft" | "dpo"
+    init_adapter_path: str | None = None  # SFT/soft_ce adapter: inits the policy AND is the reference
+    dpo_beta: float = 0.1
+    dpo_label_smoothing: float = 0.0
+    dpo_length_normalize: bool = False
+    reference_free: bool = False
+    reference_logprob_source: str = "precompute"  # precompute | ondisk | recompute
 
     def to_dict(self) -> dict[str, Any]:
         return dataclasses.asdict(self)
@@ -171,3 +181,24 @@ def validate_config(config: SFTConfig) -> None:
         raise ValueError("gradient_accumulation_steps must be >= 1")
     if config.per_device_train_batch_size < 1 or config.per_device_eval_batch_size < 1:
         raise ValueError("batch sizes must be >= 1")
+    if config.objective not in {"sft", "dpo"}:
+        raise ValueError("objective must be one of: sft, dpo")
+    if config.objective == "dpo":
+        if config.init_adapter_path is None and config.resume_from_checkpoint is None:
+            raise ValueError(
+                "objective='dpo' requires init_adapter_path (the SFT/soft_ce adapter that "
+                "initializes the policy AND serves as the frozen reference). DPO from the raw "
+                "base model would discard the SFT and regularize toward base."
+            )
+        if config.reference_logprob_source not in {"precompute", "ondisk", "recompute"}:
+            raise ValueError("reference_logprob_source must be one of: precompute, ondisk, recompute")
+        if not config.dpo_beta > 0:
+            raise ValueError("dpo_beta must be > 0")
+        if not 0.0 <= config.dpo_label_smoothing < 0.5:
+            raise ValueError("dpo_label_smoothing must be in [0, 0.5)")
+        if config.lora_dropout != 0.0:
+            print(
+                "[dpo] WARNING: lora_dropout != 0 makes policy log-probs stochastic and not "
+                "comparable to the frozen reference; set lora_dropout=0 for DPO.",
+                flush=True,
+            )

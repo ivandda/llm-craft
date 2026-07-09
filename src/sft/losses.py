@@ -21,6 +21,12 @@ class SFTLossComponents:
     concept_loss: torch.Tensor
     rationale_loss: torch.Tensor
 
+    def log_metrics(self) -> dict[str, float]:
+        return {
+            "concept_loss": float(self.concept_loss.detach().item()),
+            "rationale_loss": float(self.rationale_loss.detach().item()),
+        }
+
 
 def causal_masked_logprobs(
     logits: torch.Tensor,

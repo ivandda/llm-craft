@@ -7,13 +7,20 @@ from typing import Any
 
 import torch
 from accelerate import Accelerator
-from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
+from peft import LoraConfig, PeftModel, get_peft_model, prepare_model_for_kbit_training
 from torch.utils.data import DataLoader
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig, get_linear_schedule_with_warmup
 
 from src.sft.collator import SFTDataCollator
 from src.sft.config import SFTConfig
 from src.sft.dataset import RecipeSFTDataset
+from src.sft.dpo import (
+    DPODataCollator,
+    PreferencePairDataset,
+    compute_dpo_loss_components,
+    policy_pair_logps,
+    precompute_reference_logprobs,
+)
 from src.sft.losses import SFTLossComponents, compute_sft_loss_components
 from src.sft.plotting import plot_losses
 from src.sft.utils import (
@@ -98,6 +105,13 @@ def build_model_and_tokenizer(
     if not apply_lora:
         return model, tokenizer
 
+    # DPO (and any warm-start): initialize the policy from an existing adapter so it starts
+    # AT that model (e.g. soft_ce) and the precomputed reference == that same policy. This is
+    # the correct DPO reference; disabling the adapter would make the reference the raw base.
+    if config.init_adapter_path:
+        model = PeftModel.from_pretrained(model, config.init_adapter_path, is_trainable=True)
+        return model, tokenizer
+
     target_modules = (
         infer_lora_target_modules(model)
         if config.lora_target_modules == "auto"
@@ -114,7 +128,36 @@ def build_model_and_tokenizer(
     return get_peft_model(model, lora_config), tokenizer
 
 
+def build_dpo_dataloaders(config: SFTConfig, tokenizer: Any) -> tuple[DataLoader, DataLoader]:
+    train_dataset = PreferencePairDataset(config.train_path, max_examples=config.max_train_examples)
+    dev_dataset = PreferencePairDataset(config.dev_path, max_examples=config.max_dev_examples)
+    collator = DPODataCollator(
+        tokenizer=tokenizer,
+        max_seq_length=config.max_seq_length,
+        prompt_format=config.prompt_format,
+        system_prompt=config.system_prompt,
+    )
+    # batch_size counts preference pairs; each pair expands to 2 tokenized rows (chosen+rejected).
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=config.per_device_train_batch_size,
+        shuffle=True,
+        collate_fn=collator,
+        num_workers=config.dataloader_num_workers,
+    )
+    dev_loader = DataLoader(
+        dev_dataset,
+        batch_size=config.per_device_eval_batch_size,
+        shuffle=False,
+        collate_fn=collator,
+        num_workers=config.dataloader_num_workers,
+    )
+    return train_loader, dev_loader
+
+
 def build_dataloaders(config: SFTConfig, tokenizer: Any) -> tuple[DataLoader, DataLoader]:
+    if config.objective == "dpo":
+        return build_dpo_dataloaders(config, tokenizer)
     train_dataset = RecipeSFTDataset(
         config.train_path,
         weight_field=config.weight_field,
@@ -164,11 +207,50 @@ def build_dataloaders(config: SFTConfig, tokenizer: Any) -> tuple[DataLoader, Da
     return train_loader, dev_loader
 
 
+def batch_units(batch: dict[str, torch.Tensor], config: SFTConfig) -> int:
+    """Number of loss units in a batch: recipes (groups) for SFT, pairs for DPO."""
+    if config.objective == "dpo":
+        return int(batch["pair_index"].numel())
+    return int(torch.unique(batch["group_ids"]).numel())
+
+
+def dpo_batch_loss_components(
+    model: torch.nn.Module,
+    batch: dict[str, torch.Tensor],
+    config: SFTConfig,
+    ref_cache: dict[int, tuple[float, float]],
+):
+    policy_chosen, policy_rejected = policy_pair_logps(
+        model, batch, length_normalize=config.dpo_length_normalize
+    )
+    pair_index = batch["pair_index"].tolist()
+    ref_chosen = torch.tensor(
+        [ref_cache[int(i)][0] for i in pair_index], device=policy_chosen.device, dtype=policy_chosen.dtype
+    )
+    ref_rejected = torch.tensor(
+        [ref_cache[int(i)][1] for i in pair_index], device=policy_rejected.device, dtype=policy_rejected.dtype
+    )
+    return compute_dpo_loss_components(
+        policy_chosen,
+        policy_rejected,
+        ref_chosen,
+        ref_rejected,
+        beta=config.dpo_beta,
+        label_smoothing=config.dpo_label_smoothing,
+        reference_free=config.reference_free,
+    )
+
+
 def batch_loss_components(
     model: torch.nn.Module,
     batch: dict[str, torch.Tensor],
     config: SFTConfig,
-) -> SFTLossComponents:
+    ref_cache: dict[int, tuple[float, float]] | None = None,
+):
+    if config.objective == "dpo":
+        if ref_cache is None:
+            raise ValueError("DPO batch_loss_components requires a precomputed ref_cache.")
+        return dpo_batch_loss_components(model, batch, config, ref_cache)
     outputs = model(input_ids=batch["input_ids"], attention_mask=batch["attention_mask"])
     return compute_sft_loss_components(
         outputs.logits,
@@ -196,26 +278,28 @@ def evaluate_components(
     dev_loader: DataLoader,
     config: SFTConfig,
     accelerator: Accelerator,
+    ref_cache: dict[int, tuple[float, float]] | None = None,
 ) -> dict[str, float]:
     model.eval()
     total_loss = torch.tensor(0.0, device=accelerator.device)
-    total_concept_loss = torch.tensor(0.0, device=accelerator.device)
-    total_rationale_loss = torch.tensor(0.0, device=accelerator.device)
-    total_groups = torch.tensor(0.0, device=accelerator.device)
+    total_units = torch.tensor(0.0, device=accelerator.device)
+    metric_sums: dict[str, torch.Tensor] = {}
     for batch in dev_loader:
-        components = batch_loss_components(model, batch, config)
-        groups = torch.unique(batch["group_ids"]).numel()
-        total_loss += accelerator.gather_for_metrics(components.total_loss.detach() * groups).sum()
-        total_concept_loss += accelerator.gather_for_metrics(components.concept_loss.detach() * groups).sum()
-        total_rationale_loss += accelerator.gather_for_metrics(components.rationale_loss.detach() * groups).sum()
-        total_groups += accelerator.gather_for_metrics(torch.tensor(float(groups), device=accelerator.device)).sum()
+        components = batch_loss_components(model, batch, config, ref_cache)
+        units = batch_units(batch, config)
+        total_loss += accelerator.gather_for_metrics(components.total_loss.detach() * units).sum()
+        total_units += accelerator.gather_for_metrics(torch.tensor(float(units), device=accelerator.device)).sum()
+        for key, value in components.log_metrics().items():
+            weighted = accelerator.gather_for_metrics(
+                torch.tensor(value * units, device=accelerator.device)
+            ).sum()
+            metric_sums[key] = metric_sums.get(key, torch.tensor(0.0, device=accelerator.device)) + weighted
     model.train()
-    denom = total_groups.clamp_min(1.0)
-    return {
-        "loss": (total_loss / denom).item(),
-        "concept_loss": (total_concept_loss / denom).item(),
-        "rationale_loss": (total_rationale_loss / denom).item(),
-    }
+    denom = total_units.clamp_min(1.0)
+    result = {"loss": (total_loss / denom).item()}
+    for key, summed in metric_sums.items():
+        result[key] = (summed / denom).item()
+    return result
 
 
 @torch.no_grad()
@@ -321,9 +405,26 @@ def train(config: SFTConfig, run_dir: Path) -> dict[str, Any]:
     )
     global_step, start_epoch, best_dev_loss = load_checkpoint_if_needed(accelerator, config)
     latest_checkpoint: str | None = config.resume_from_checkpoint
+
+    # DPO: precompute the frozen reference log-probs once (the policy is still == soft_ce here).
+    # Train and dev pairs are indexed independently, so keep separate caches to avoid collision.
+    ref_cache_train: dict[int, tuple[float, float]] | None = None
+    ref_cache_dev: dict[int, tuple[float, float]] | None = None
+    if config.objective == "dpo":
+        if config.reference_free:
+            ref_cache_train, ref_cache_dev = {}, {}
+        else:
+            if accelerator.is_main_process:
+                print("[dpo] precomputing reference log-probs (soft_ce) ...", flush=True)
+            ref_cache_train = precompute_reference_logprobs(
+                model, train_loader, length_normalize=config.dpo_length_normalize
+            )
+            ref_cache_dev = precompute_reference_logprobs(
+                model, dev_loader, length_normalize=config.dpo_length_normalize
+            )
+
     running_loss = 0.0
-    running_concept_loss = 0.0
-    running_rationale_loss = 0.0
+    running_metrics: dict[str, float] = {}
     running_count = 0
     train_start_time = time.perf_counter()
 
@@ -331,7 +432,7 @@ def train(config: SFTConfig, run_dir: Path) -> dict[str, Any]:
     for epoch in range(start_epoch, total_epochs):
         for batch in train_loader:
             with accelerator.accumulate(model):
-                loss_components = batch_loss_components(model, batch, config)
+                loss_components = batch_loss_components(model, batch, config, ref_cache_train)
                 loss = loss_components.total_loss
                 accelerator.backward(loss)
                 if accelerator.sync_gradients:
@@ -341,41 +442,47 @@ def train(config: SFTConfig, run_dir: Path) -> dict[str, Any]:
                 optimizer.zero_grad()
 
             running_loss += loss.detach().float().item()
-            running_concept_loss += loss_components.concept_loss.detach().float().item()
-            running_rationale_loss += loss_components.rationale_loss.detach().float().item()
+            for _key, _val in loss_components.log_metrics().items():
+                running_metrics[_key] = running_metrics.get(_key, 0.0) + _val
             running_count += 1
             if accelerator.sync_gradients:
                 global_step += 1
                 if config.logging_steps > 0 and global_step % config.logging_steps == 0:
                     avg_loss = running_loss / max(1, running_count)
-                    avg_concept_loss = running_concept_loss / max(1, running_count)
-                    avg_rationale_loss = running_rationale_loss / max(1, running_count)
+                    avg_metrics = {k: v / max(1, running_count) for k, v in running_metrics.items()}
                     running_loss = 0.0
-                    running_concept_loss = 0.0
-                    running_rationale_loss = 0.0
+                    running_metrics = {}
                     running_count = 0
                     elapsed_seconds = max(0.0, time.perf_counter() - train_start_time)
                     avg_step_seconds = elapsed_seconds / max(1, global_step)
                     remaining_steps = max(0, total_steps - global_step)
                     eta_seconds = avg_step_seconds * remaining_steps
                     record = {"step": global_step, "epoch": epoch, "loss": avg_loss}
-                    if config.rationale_loss_weight > 0:
+                    if config.objective == "dpo":
+                        record.update(avg_metrics)
+                    elif config.rationale_loss_weight > 0:
                         record.update(
                             {
-                                "concept_loss": avg_concept_loss,
-                                "rationale_loss": avg_rationale_loss,
+                                "concept_loss": avg_metrics.get("concept_loss", 0.0),
+                                "rationale_loss": avg_metrics.get("rationale_loss", 0.0),
                                 "rationale_loss_weight": config.rationale_loss_weight,
                             }
                         )
                     if accelerator.is_main_process:
                         loss_parts = f"train_loss={avg_loss:.4f}"
-                        if config.rationale_loss_weight > 0:
+                        if config.objective == "dpo":
                             loss_parts += (
-                                f" concept_loss={avg_concept_loss:.4f}"
-                                f" rationale_loss={avg_rationale_loss:.4f}"
+                                f" reward_margin={avg_metrics.get('reward_margin', 0.0):.4f}"
+                                f" reward_acc={avg_metrics.get('reward_accuracy', 0.0):.3f}"
                             )
+                        elif config.rationale_loss_weight > 0:
+                            loss_parts += (
+                                f" concept_loss={avg_metrics.get('concept_loss', 0.0):.4f}"
+                                f" rationale_loss={avg_metrics.get('rationale_loss', 0.0):.4f}"
+                            )
+                        tag = "dpo" if config.objective == "dpo" else "sft"
                         print(
-                            f"[sft] step={global_step} epoch={epoch} {loss_parts} "
+                            f"[{tag}] step={global_step} epoch={epoch} {loss_parts} "
                             f"elapsed={format_duration(elapsed_seconds)} "
                             f"eta={format_duration(eta_seconds)}",
                             flush=True,
@@ -392,12 +499,18 @@ def train(config: SFTConfig, run_dir: Path) -> dict[str, Any]:
                         )
 
                 if config.eval_steps > 0 and global_step % config.eval_steps == 0:
-                    dev_components = evaluate_components(model, dev_loader, config, accelerator)
+                    dev_components = evaluate_components(model, dev_loader, config, accelerator, ref_cache_dev)
                     dev_loss = dev_components["loss"]
                     if accelerator.is_main_process:
-                        print(f"[sft] step={global_step} epoch={epoch} dev_loss={dev_loss:.4f}", flush=True)
+                        tag = "dpo" if config.objective == "dpo" else "sft"
+                        extra = ""
+                        if config.objective == "dpo":
+                            extra = f" reward_acc={dev_components.get('reward_accuracy', 0.0):.3f}"
+                        print(f"[{tag}] step={global_step} epoch={epoch} dev_loss={dev_loss:.4f}{extra}", flush=True)
                         eval_record = {"step": global_step, "epoch": epoch, "loss": dev_loss}
-                        if config.rationale_loss_weight > 0:
+                        if config.objective == "dpo":
+                            eval_record.update({k: v for k, v in dev_components.items() if k != "loss"})
+                        elif config.rationale_loss_weight > 0:
                             eval_record.update(
                                 {
                                     "concept_loss": dev_components["concept_loss"],
@@ -429,11 +542,15 @@ def train(config: SFTConfig, run_dir: Path) -> dict[str, Any]:
         if config.max_steps > 0 and global_step >= config.max_steps:
             break
 
-    final_dev_components = evaluate_components(model, dev_loader, config, accelerator) if len(dev_loader) > 0 else None
+    final_dev_components = (
+        evaluate_components(model, dev_loader, config, accelerator, ref_cache_dev) if len(dev_loader) > 0 else None
+    )
     final_dev_loss = final_dev_components["loss"] if final_dev_components is not None else None
     if final_dev_loss is not None and accelerator.is_main_process:
         final_eval_record = {"step": global_step, "epoch": total_epochs, "loss": final_dev_loss}
-        if config.rationale_loss_weight > 0 and final_dev_components is not None:
+        if config.objective == "dpo" and final_dev_components is not None:
+            final_eval_record.update({k: v for k, v in final_dev_components.items() if k != "loss"})
+        elif config.rationale_loss_weight > 0 and final_dev_components is not None:
             final_eval_record.update(
                 {
                     "concept_loss": final_dev_components["concept_loss"],
