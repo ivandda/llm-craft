@@ -147,6 +147,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--output_dir", required=True, help="Where to write pairs.jsonl + pairs.meta.json.")
     parser.add_argument("--max_examples", type=int, default=None)
     parser.add_argument("--num_samples", type=int, default=6)
+    parser.add_argument("--gen_batch_size", type=int, default=16, help="Recipes per generate() call (batched for throughput).")
+    parser.add_argument("--log_every", type=int, default=25, help="Progress log cadence (recipes).")
     parser.add_argument("--max_new_tokens", type=int, default=24)
     parser.add_argument("--temperature", type=float, default=0.9)
     parser.add_argument("--top_p", type=float, default=0.95)
@@ -181,21 +183,27 @@ def main(argv: list[str] | None = None) -> None:
     model = PeftModel.from_pretrained(model, str(adapter_dir))
     model.eval()
     device = args.device or ("cuda" if torch.cuda.is_available() else "cpu")
+    # Left-pad so batched generation slices completions correctly for every row.
+    tokenizer.padding_side = "left"
 
     records = load_eval_records(args.input_file, max_examples=args.max_examples)
-    # keep candidate rows (rank/source) for the fallback chosen.
     raw_rows = _load_candidate_rows(args.input_file, args.max_examples)
+    print(f"[dpo-pairs] {len(records)} recipes, K={args.num_samples}, batch={args.gen_batch_size} on {device}", flush=True)
+    import time as _time
 
+    start_time = _time.perf_counter()
     pairs: list[dict[str, Any]] = []
     skips = Counter()
-    for record in records:
-        prompt = render_generation_prompt(
-            record, config, tokenizer, close_think=args.close_think_prompt
-        )
-        inputs = tokenizer(prompt, return_tensors="pt").to(device)
+    done = 0
+    for chunk_start in range(0, len(records), args.gen_batch_size):
+        chunk = records[chunk_start : chunk_start + args.gen_batch_size]
+        prompts = [
+            render_generation_prompt(r, config, tokenizer, close_think=args.close_think_prompt) for r in chunk
+        ]
+        enc = tokenizer(prompts, return_tensors="pt", padding=True).to(device)
         with torch.no_grad():
             sequences = model.generate(
-                **inputs,
+                **enc,
                 do_sample=True,
                 temperature=args.temperature,
                 top_p=args.top_p,
@@ -204,22 +212,30 @@ def main(argv: list[str] | None = None) -> None:
                 num_return_sequences=args.num_samples,
                 pad_token_id=tokenizer.pad_token_id,
             )
-        decoded = decode_generated_text(tokenizer, sequences, inputs["input_ids"].shape[1])
-        raw_samples = [strip_think_block(t).strip() if args.strip_think else t.strip() for t in decoded]
-
-        candidate_rows = raw_rows.get(record.pair_id, [])
-        pair = select_preference_pair(
-            record.input_a,
-            record.input_b,
-            record.known_outputs,
-            record.canonical_output,
-            raw_samples,
-            candidate_rows=candidate_rows,
-        )
-        if pair is None:
-            skips["skipped"] += 1
-            continue
-        pairs.append(pair)
+        decoded = decode_generated_text(tokenizer, sequences, enc["input_ids"].shape[1])
+        for i, record in enumerate(chunk):
+            group = decoded[i * args.num_samples : (i + 1) * args.num_samples]
+            raw_samples = [strip_think_block(t).strip() if args.strip_think else t.strip() for t in group]
+            pair = select_preference_pair(
+                record.input_a,
+                record.input_b,
+                record.known_outputs,
+                record.canonical_output,
+                raw_samples,
+                candidate_rows=raw_rows.get(record.pair_id, []),
+            )
+            if pair is None:
+                skips["skipped"] += 1
+            else:
+                pairs.append(pair)
+            done += 1
+            if done % args.log_every == 0:
+                rate = done / max(1e-6, _time.perf_counter() - start_time)
+                print(
+                    f"[dpo-pairs] {done}/{len(records)} recipes | {len(pairs)} pairs "
+                    f"{skips['skipped']} skipped | {rate:.1f} rec/s",
+                    flush=True,
+                )
 
     output_dir = Path(args.output_dir)
     _write_jsonl(output_dir / "pairs.jsonl", pairs)
