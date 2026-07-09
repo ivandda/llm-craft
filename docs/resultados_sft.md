@@ -47,6 +47,11 @@ par `(input_a, input_b)` con una o más **salidas** válidas.
   composicional está; el cuello de botella es la **forma** (verbosidad, tokens cortados).
 - **Más de la mitad de sus respuestas son descubrimientos** (correctos **y** fuera de la
   lista del teacher): 53.6% top-1. El alumno generaliza, no memoriza.
+- **DPO arregló la forma (§9.2).** Partiendo de `soft_ce`, DPO sobre pares (respuesta corta
+  del dataset vs la propia salida verbosa del modelo) llevó la **cobertura exacta de 7.3% a
+  42.2% (×5.8)** y la brevedad a **100% ≤2 palabras**, sin degenerar (empty=0). Confirma la
+  tesis: el conocimiento estaba, faltaba ranking/forma — y la señal negativa de DPO (que a
+  SFT le falta) lo resolvió.
 
 ---
 
@@ -301,16 +306,73 @@ sino en control de forma.**
 
 ## 8. Próximos pasos
 
-1. **DPO desde `soft_ce`** (alto impacto). Preferidos = `known_outputs` cortos/canónicos;
-   rechazados = las muestras verbosas/corruptas del propio modelo. Ataca de frente brevedad
-   + correctitud, y el any@k 96.8% dice que la buena muestra ya existe: falta rankearla top-1.
-2. **Re-decodificar el ganador** (`max_new_tokens≈12`, `repetition_penalty` más suave) para
-   ver cuánto del 16.7% inválido es artefacto de decoding. Barato, sin reentrenar.
+1. **Re-decodificar el ganador** (probado, ver §9.1): NO ayuda — el 16.7% inválido es del
+   modelo, no del decoding.
+2. **DPO desde `soft_ce`** (hecho, ver §9.2): ×5.8 en cobertura exacta. ✅
 3. **Higiene de datos:** recortar `known_outputs` a ≤2 palabras para alinear target y métrica.
+4. **Juez LLM sobre el DPO** (pendiente): medir si la Validez/Creatividad "real" también sube.
 
 ---
 
-## 9. Apéndice — reproducción
+## 9. Post-SFT: decoding y DPO
+
+### 9.1 Re-decodificación (descartada)
+Hipótesis: parte del 16.7% inválido de `soft_ce` era artefacto de decoding
+(`max_new_tokens=8` corta a mitad de palabra, `repetition_penalty=1.15` mutila). Se
+re-generó `soft_ce` en test con `max_new_tokens=16`, `repetition_penalty=1.05`,
+`no_repeat_ngram_size=0`. **Resultado: no ayuda** — cobertura plana (top1_known 0.073→0.070)
+y **verbosidad peor** (≤2 palabras 40.9%→38.2%). ⇒ El inválido/verbosidad es **comportamiento
+del modelo**, no del decoding. Confirma que DPO (no decoding) es el lever correcto.
+
+### 9.2 DPO desde `soft_ce` (resultado principal)
+
+**Idea:** SFT solo ve ejemplos positivos; no puede empujar hacia abajo la salida verbosa/
+basura que el modelo rankea alto. DPO entrena sobre pares (chosen, rejected) y sube la
+respuesta corta/válida **por encima** de la propia salida mala del modelo — atacando el
+cuello de botella (ranking/forma) que el eval del juez había identificado (any@k Validez 96.8%
+= el modelo ya sabe; falta que la buena muestra sea el top-1).
+
+**Setup:**
+- Política inicializada desde el adapter `soft_ce`; **reference = el propio `soft_ce`**
+  (logprobs precomputados una vez), NO el modelo base. QLoRA, `β=0.1`, `lora_dropout=0`,
+  1 época sobre ~1799 pares, `dpo_length_normalize=true`.
+- **Pares (rule-based, sin juez):** `chosen` = un `candidate_output` corto (≤2 palabras) del
+  dataset; `rejected` = una muestra **cruda on-policy** del propio `soft_ce` (verbosa/inválida,
+  ~8 palabras). Generados con `src/data/build_dpo_pairs.py`. Hallazgo: el modelo **nunca**
+  produjo una respuesta corta válida on-policy (chosen 100% del dataset) — over-genera siempre.
+- **`dpo_length_normalize`** fue clave: los pares tienen asimetría de longitud fuerte
+  (chosen ~1.2 vs rejected ~8 palabras); normalizar el logp por longitud neutraliza el sesgo
+  y evita que DPO colapse a "emitir EOS enseguida". Resultado: **empty_top1 = 0** (sin degenerar).
+
+**Resultado (test completo, 1263, misma decodificación que la ablation):**
+
+| Métrica | `soft_ce` | **DPO** | mejora |
+|---|---|---|---|
+| **top1_known** (cobertura exacta) | 0.073 | **0.422** | **×5.8** |
+| any@k_known | 0.143 | **0.567** | ×4.0 |
+| top1_canon | 0.042 | **0.276** | ×6.6 |
+| top1_sem (coseno ≥0.75) | 0.337 | **0.528** | +19 pp |
+| any@k_sem | 0.511 | **0.685** | +17 pp |
+| **≤2 palabras** | 40.9% | **100%** | — |
+| media palabras (top-1) | 2.50 | **1.08** | — |
+| **empty_top1** | 0.000 | **0.000** | sin degeneración |
+
+**Lectura.** DPO **cuadruplicó-a-quintuplicó la cobertura exacta** (7.3%→42.2%) y **resolvió
+la verbosidad** (100% ≤2 palabras) sin degenerar (empty=0). Confirma la tesis del informe: el
+conocimiento composicional ya estaba en `soft_ce` (Validez 83% del juez, §4.4); lo que faltaba
+era **forma/ranking**, y DPO — con la señal negativa que a SFT le falta — lo convirtió en el
+top-1 corto y correcto. Ejemplos: `water+white→snow`, `glass+sky→telescope`,
+`lead+zebra→poisoned animal`, `pottery+steel→kiln`.
+
+**Limitaciones.** Convergencia muy rápida (loss→0, reward_margin→~5.5 en <100 steps) porque los
+pares son trivialmente separables; el `dpo_length_normalize` + ancla a `soft_ce` evitaron la
+degeneración, pero conviene un barrido de β/steps en el futuro. Falta el **juez LLM sobre el
+DPO** (Validez/Creatividad) para el cuadro completo. Código en la rama `feature/dpo-softce`
+(`src/sft/dpo.py`, `src/data/build_dpo_pairs.py`).
+
+---
+
+## 10. Apéndice — reproducción
 
 **Predicciones:** `gs://llm-craft-bucket/eval_outputs/cu126_<variante>_test/predictions.jsonl`
 (`<variante> ∈ {concept_set, softce, concept_set_uniform, ce_uniform, base}`).
