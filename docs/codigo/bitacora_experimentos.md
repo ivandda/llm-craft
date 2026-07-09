@@ -195,7 +195,14 @@ Cobertura semántica (coseno ≥0.75 a un `known_output`, MiniLM), como robustez
 
 ### CCS (métrica secundaria / exploratoria)
 
-| Modelo | CCS | plaus | novelty | diversity |
+> 🐛 **Corrección posterior (2026-07-08): estos números de CCS tienen un bug de signo en
+> `diversity`** (`diversity_score` estaba como `1−d/2`, premiando muestras *parecidas* en
+> vez de variadas). Ya corregido en `creativity.py`. Con el fix, el CCS se recalcula a
+> `soft_ce 0.178 > ce_uniform 0.177 > cs_uniform 0.171 > concept_set 0.169 > base 0.152`,
+> que **coincide con cobertura** (ver `resultados_sft.md` §4.3). La tabla de abajo y la
+> conclusión 4 quedan como registro histórico del cómputo buggy.
+
+| Modelo | CCS (buggy) | plaus | novelty | diversity |
 |---|---|---|---|---|
 | `concept_set` | 0.324 | 0.780 | 0.304 | 0.887 |
 | `concept_set_uniform` | 0.321 | 0.776 | 0.306 | 0.877 |
@@ -221,12 +228,12 @@ Cobertura semántica (coseno ≥0.75 a un `known_output`, MiniLM), como robustez
    distingue. Interpretación: promediar la NLL por candidato (soft-CE) enseña a
    generar la respuesta *modal*; el log-sum-exp reparte masa sobre el conjunto y
    diluye el top-1.
-4. **CCS contradice a cobertura y por eso queda como secundaria.** El CCS rankea
-   `concept_set` **primero** (0.324) — exactamente al revés que cobertura — porque
-   premia diversidad/novedad (concept_set diverge más de los inputs) sin verificar si
-   la respuesta es *correcta*. Esto confirma la decisión de usar cobertura como métrica
-   primaria y tratar el CCS como exploratorio. La diferencia de CCS entre las 4 celdas
-   (0.313–0.324) es además ruido; no sirve para elegir.
+4. **CCS contradice a cobertura y por eso queda como secundaria.** ⚠️ *Esta conclusión era
+   un **artefacto del bug de signo en `diversity`** (ver banner arriba).* El CCS buggy
+   rankeaba `concept_set` primero (0.324); con el fix, `soft_ce`/`ce_uniform` lideran y el
+   CCS **coincide** con cobertura. Igual sigue siendo exploratorio: no verifica correctitud
+   (el término de plausibilidad es distancia a embeddings, no un juez) y la banda entre las
+   4 celdas es angosta. El veredicto de calidad lo da el juez LLM (2026-07-08).
 
 ➡️ **Decisión: adoptar `soft_ce` (dataset × expected_logprob) como la loss ganadora del
 SFT.** Las cifras absolutas son bajas (7% top1 exacto) porque el target admite muchos

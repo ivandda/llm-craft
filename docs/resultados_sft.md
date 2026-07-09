@@ -87,9 +87,11 @@ sin ningún modelo que juzgue correctitud:
 - **novelty (n):** distancia de la muestra a los dos *inputs* (NO respecto al dataset).
 - **diversity (d):** dispersión entre las 4 muestras.
 - **Pros:** barato, señal continua de forma/variedad; chequeo de cordura.
-- **Contras:** **no verifica correctitud** (premió al base por "novedad" cuando escupía
-  `"Hmm the user"`); `novelty` mide distancia al input, no creatividad; su valor absoluto
-  es poco interpretable. ⇒ Descriptor, no veredicto.
+- **Contras:** sus componentes **no verifican correctitud**: el `base` (que escupe `"Hmm
+  the user"`) saca la novedad y la diversidad **más altas** de todas — solo el término de
+  plausibilidad evita que rankee bien. `novelty` mide distancia al input, no creatividad;
+  su valor absoluto es poco interpretable. ⇒ Descriptor, no veredicto. *(Tenía además un
+  bug de signo en `diversity`, ya corregido; ver §4.3.)*
 
 ### 3.5 Juez LLM — Validez y Creatividad *(la métrica "de verdad")*
 Un LLM **más fuerte que el teacher** juzga, **sin ver los `known_outputs`**, si la salida
