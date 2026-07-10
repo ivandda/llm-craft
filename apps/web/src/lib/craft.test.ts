@@ -331,6 +331,10 @@ describe("craft utilities", () => {
     vi.unstubAllGlobals();
     delete process.env.VERTEX_API_KEY;
     delete process.env.VERTEX_MODEL;
+    delete process.env.VERTEX_USE_GCE_METADATA;
+    delete process.env.GOOGLE_APPLICATION_CREDENTIALS;
+    delete process.env.GOOGLE_CLOUD_PROJECT;
+    delete process.env.VERTEX_LOCATION;
     delete process.env.QWEN_COMBINER_BASE_URL;
     delete process.env.QWEN_COMBINER_API_KEY;
     delete process.env.QWEN_COMBINER_MODEL;
@@ -527,6 +531,61 @@ describe("craft utilities", () => {
 
     expect(response.model).toBe("gemini-2.5-flash-lite");
     expect(capturedUrl).toContain("gemini-2.5-flash-lite");
+  });
+
+  it("can request Vertex with GCE metadata credentials", async () => {
+    process.env.VERTEX_USE_GCE_METADATA = "true";
+    process.env.GOOGLE_CLOUD_PROJECT = "test-project";
+    process.env.VERTEX_LOCATION = "us-east5";
+
+    const capturedUrls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string | URL) => {
+        const requestUrl = String(url);
+        capturedUrls.push(requestUrl);
+
+        if (requestUrl.includes("metadata.google.internal")) {
+          return {
+            ok: true,
+            json: async () => ({ access_token: "metadata-token" })
+          };
+        }
+
+        return {
+          ok: true,
+          json: async () => ({
+            candidates: [
+              {
+                content: {
+                  parts: [
+                    {
+                      text: JSON.stringify({
+                        name: "forest signal",
+                        emoji: "*",
+                        rationale: "tree and cloud form a visible signal"
+                      })
+                    }
+                  ]
+                }
+              }
+            ]
+          })
+        };
+      })
+    );
+
+    const response = await combineElementsWithDataset({
+      inputA: createElementToken("tree"),
+      inputB: createElementToken("cloud"),
+      inventory: BASE_ELEMENTS
+    });
+
+    expect(response.result.name).toBe("forest signal");
+    expect(capturedUrls[0]).toContain("metadata.google.internal");
+    expect(capturedUrls[1]).toContain(
+      "https://us-east5-aiplatform.googleapis.com/v1/projects/test-project"
+    );
   });
 
   it("generates and stores missing dataset recipes with Qwen", async () => {
@@ -811,7 +870,7 @@ describe("craft utilities", () => {
         inventory: BASE_ELEMENTS
       })
     ).rejects.toThrow(
-      "VERTEX_API_KEY or GOOGLE_APPLICATION_CREDENTIALS is not configured"
+      "VERTEX_API_KEY, GOOGLE_APPLICATION_CREDENTIALS, or VERTEX_USE_GCE_METADATA is not configured"
     );
   });
 

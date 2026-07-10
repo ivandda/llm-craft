@@ -35,6 +35,7 @@ postgres://llm_craft:llm_craft_dev@localhost:5432/llm_craft
 
 La guía completa está en [postgres_dataset_db.md](docs/codigo/postgres_dataset_db.md).
 El runbook operativo está en [postgres-local-db-runbook.md](docs/postgres-local-db-runbook.md).
+El runbook para hostear web + modelo + DB en una VM está en [all-in-one-vm-runbook.md](docs/all-in-one-vm-runbook.md).
 
 ---
 

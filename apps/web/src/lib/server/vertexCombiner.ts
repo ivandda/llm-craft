@@ -6,6 +6,8 @@ import { readFile } from "fs/promises";
 
 const VERTEX_ENDPOINT = "https://aiplatform.googleapis.com/v1";
 const VERTEX_OAUTH_SCOPE = "https://www.googleapis.com/auth/cloud-platform";
+const GCE_METADATA_TOKEN_URL =
+  "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token";
 const DEFAULT_VERTEX_LOCATION = "us-central1";
 const REQUEST_TIMEOUT_MS = 15_000;
 const PRO_REQUEST_TIMEOUT_MS = 45_000;
@@ -105,7 +107,7 @@ export async function requestVertexJson(
   const apiKey = process.env.VERTEX_API_KEY?.trim();
   const response = apiKey
     ? await requestWithApiKey(body, apiKey, model, timeoutMs)
-    : await requestWithServiceAccount(body, model, timeoutMs);
+    : await requestWithGoogleCredentials(body, model, timeoutMs);
 
   return response.json() as Promise<unknown>;
 }
@@ -132,6 +134,26 @@ async function requestWithApiKey(
   return response;
 }
 
+async function requestWithGoogleCredentials(
+  body: unknown,
+  model: string,
+  timeoutMs: number
+): Promise<Response> {
+  const credentialsPath = process.env.GOOGLE_APPLICATION_CREDENTIALS?.trim();
+
+  if (credentialsPath) {
+    return requestWithServiceAccount(body, model, timeoutMs);
+  }
+
+  if (usesGceMetadataCredentials()) {
+    return requestWithGceMetadata(body, model, timeoutMs);
+  }
+
+  throw new VertexConfigurationError(
+    "VERTEX_API_KEY, GOOGLE_APPLICATION_CREDENTIALS, or VERTEX_USE_GCE_METADATA is not configured"
+  );
+}
+
 async function requestWithServiceAccount(
   body: unknown,
   model: string,
@@ -140,6 +162,34 @@ async function requestWithServiceAccount(
   const credentials = await loadServiceAccountCredentials();
   const accessToken = await createAccessToken(credentials);
   const response = await fetch(buildServiceAccountUrl(credentials, model), {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(timeoutMs)
+  }).catch((error: unknown) => {
+    throw new VertexGenerationError(getErrorMessage(error));
+  });
+
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    throw new VertexGenerationError(
+      `Vertex request failed with ${response.status}${detail ? `: ${detail}` : ""}`
+    );
+  }
+
+  return response;
+}
+
+async function requestWithGceMetadata(
+  body: unknown,
+  model: string,
+  timeoutMs: number
+): Promise<Response> {
+  const accessToken = await createMetadataAccessToken();
+  const response = await fetch(buildServiceAccountUrl({}, model), {
     method: "POST",
     headers: {
       Authorization: `Bearer ${accessToken}`,
@@ -271,6 +321,29 @@ async function createAccessToken(
   return payload.access_token;
 }
 
+async function createMetadataAccessToken(): Promise<string> {
+  const response = await fetch(GCE_METADATA_TOKEN_URL, {
+    headers: { "Metadata-Flavor": "Google" },
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
+  }).catch((error: unknown) => {
+    throw new VertexGenerationError(getErrorMessage(error));
+  });
+
+  if (!response.ok) {
+    throw new VertexGenerationError(
+      `Metadata token request failed with ${response.status}`
+    );
+  }
+
+  const payload = (await response.json()) as { access_token?: string };
+
+  if (!payload.access_token) {
+    throw new VertexGenerationError("Metadata token response did not include access_token");
+  }
+
+  return payload.access_token;
+}
+
 function createJwtAssertion(
   credentials: ServiceAccountCredentials,
   tokenUri: string
@@ -305,6 +378,12 @@ function getProjectId(credentials: ServiceAccountCredentials): string {
   }
 
   return projectId;
+}
+
+function usesGceMetadataCredentials(): boolean {
+  return ["1", "true", "yes"].includes(
+    process.env.VERTEX_USE_GCE_METADATA?.trim().toLowerCase() ?? ""
+  );
 }
 
 function extractVertexText(response: VertexResponse): string {
