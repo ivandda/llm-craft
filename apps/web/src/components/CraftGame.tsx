@@ -6,9 +6,7 @@ import {
   requestLeaderboard,
   requestLeaderboardSubmission
 } from "@/lib/api";
-import {
-  getVertexModelLabel,
-} from "@/lib/agentModels";
+import { getCombinerModelLabel } from "@/lib/agentModels";
 import { mergeInventory } from "@/lib/craft";
 import { selectDpoCandidates } from "@/lib/dpo";
 import { getInitialInventoryForMode } from "@/lib/gameModes";
@@ -1474,7 +1472,7 @@ function StatusToast({
             ) : null}
             {result.source === "model_generated" && result.model ? (
               <span className="rounded border border-zinc-200 bg-zinc-50 px-2 py-1 dark:border-zinc-700 dark:bg-zinc-900">
-                {getVertexModelLabel(result.model)}
+                {getCombinerModelLabel(result.model)}
               </span>
             ) : null}
           </div>

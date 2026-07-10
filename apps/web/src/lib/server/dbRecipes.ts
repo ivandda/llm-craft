@@ -1,6 +1,7 @@
 import { createElementToken, normalizeConcept } from "@/lib/craft";
-import { DEFAULT_VERTEX_MODEL } from "@/lib/agentModels";
+import { DEFAULT_VERTEX_MODEL, isQwenCombinerModel } from "@/lib/agentModels";
 import { query, transaction } from "@/lib/server/db";
+import { generateCombinationWithQwen } from "@/lib/server/qwenCombiner";
 import {
   generateCombinationWithVertex,
   getVertexModel
@@ -34,8 +35,10 @@ export async function combineElementsWithDataset(
     return recipe;
   }
 
-  const generatedRecipe = await generateCombinationWithVertex(request, model);
-  await saveGeneratedRecipe(request, generatedRecipe, model);
+  const generatedRecipe = isQwenCombinerModel(model)
+    ? await generateCombinationWithQwen(request, model)
+    : await generateCombinationWithVertex(request, model);
+  await saveGeneratedRecipe(request, generatedRecipe, model, getGenerationSource(model));
   return generatedRecipe;
 }
 
@@ -91,7 +94,8 @@ async function findStoredRecipe(
 async function saveGeneratedRecipe(
   request: CombineRequest,
   response: CombineResponse,
-  model: string
+  model: string,
+  generationSource: string
 ): Promise<void> {
   const [leftInput, rightInput] = [
     normalizeConcept(request.inputA.name),
@@ -101,7 +105,7 @@ async function saveGeneratedRecipe(
   const pairId = createPairId(datasetName, leftInput, rightInput);
 
   await transaction(async (client) => {
-    await ensureGeneratedDataset(client, datasetName, model);
+    await ensureGeneratedDataset(client, datasetName, model, generationSource);
     const storedPairId = await upsertGeneratedPair(client, {
       datasetName,
       pairId,
@@ -116,7 +120,8 @@ async function saveGeneratedRecipe(
 async function ensureGeneratedDataset(
   client: PoolClient,
   datasetName: string,
-  model: string
+  model: string,
+  generationSource: string
 ): Promise<void> {
   await client.query(
     `
@@ -127,7 +132,7 @@ async function ensureGeneratedDataset(
     [
       datasetName,
       "apps/web",
-      toJsonb({ source: "vertex-web-combinator", model })
+      toJsonb({ source: generationSource, model })
     ]
   );
 }
@@ -229,6 +234,12 @@ function getGeneratedDatasetLookupOrder(model: string): string[] {
   }
 
   return datasets;
+}
+
+function getGenerationSource(model: string): string {
+  return isQwenCombinerModel(model)
+    ? "qwen-vm-web-combinator"
+    : "vertex-web-combinator";
 }
 
 function toJsonb(value: unknown): string {

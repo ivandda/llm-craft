@@ -10,9 +10,9 @@ import {
   type AuthSession
 } from "@/lib/api";
 import {
-  DEFAULT_VERTEX_MODEL,
-  isKnownVertexModel,
-  VERTEX_MODEL_OPTIONS
+  COMBINER_MODEL_OPTIONS,
+  DEFAULT_COMBINER_MODEL,
+  isKnownCombinerModel
 } from "@/lib/agentModels";
 import { GOAL_PRESET } from "@/lib/gameModes";
 import {
@@ -58,7 +58,7 @@ export function AppShell() {
   const [selectedMode, setSelectedMode] = useState<GameMode | null>(null);
   const [goalDepth, setGoalDepth] = useState(3);
   const [selectedCombinerModel, setSelectedCombinerModel] =
-    useState(DEFAULT_VERTEX_MODEL);
+    useState(DEFAULT_COMBINER_MODEL);
   const [hasHydratedCombinerModel, setHasHydratedCombinerModel] = useState(false);
   const [activeGoalPreset, setActiveGoalPreset] = useState<GoalPreset>(GOAL_PRESET);
   const [snapshot, setSnapshot] = useState<GameSnapshot>(EMPTY_SNAPSHOT);
@@ -426,7 +426,7 @@ function ModeMenu({
               onChange={(event) => onCombinerModelChange(event.target.value)}
               value={selectedCombinerModel}
             >
-              {VERTEX_MODEL_OPTIONS.map((model) => (
+              {COMBINER_MODEL_OPTIONS.map((model) => (
                 <option key={model.id} value={model.id}>
                   {model.label}
                 </option>
@@ -450,14 +450,14 @@ function readStoredModel(key: string): string {
   const rawValue = window.localStorage.getItem(key);
 
   if (!rawValue) {
-    return DEFAULT_VERTEX_MODEL;
+    return DEFAULT_COMBINER_MODEL;
   }
 
   try {
     const model = JSON.parse(rawValue) as unknown;
-    return isKnownVertexModel(model) ? model : DEFAULT_VERTEX_MODEL;
+    return isKnownCombinerModel(model) ? model : DEFAULT_COMBINER_MODEL;
   } catch {
-    return DEFAULT_VERTEX_MODEL;
+    return DEFAULT_COMBINER_MODEL;
   }
 }
 

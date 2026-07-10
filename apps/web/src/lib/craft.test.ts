@@ -31,6 +31,12 @@ import type { GoalPathStep } from "@/lib/server/randomGoals";
 import { saveDpoPreference } from "@/lib/server/dpoPreferences";
 import { combineElementsWithDataset } from "@/lib/server/dbRecipes";
 import { runAgentGoalTest } from "@/lib/server/agentTestRunner";
+import {
+  getCombinerModelLabel,
+  isKnownCombinerModel,
+  isQwenCombinerModel
+} from "@/lib/agentModels";
+import { parseQwenConcept } from "@/lib/server/qwenCombiner";
 import { POST as combinePost } from "../../app/api/combine/route";
 import type { GoalPreset } from "@/lib/types";
 
@@ -325,6 +331,9 @@ describe("craft utilities", () => {
     vi.unstubAllGlobals();
     delete process.env.VERTEX_API_KEY;
     delete process.env.VERTEX_MODEL;
+    delete process.env.QWEN_COMBINER_BASE_URL;
+    delete process.env.QWEN_COMBINER_API_KEY;
+    delete process.env.QWEN_COMBINER_MODEL;
   });
 
   it("normalizes concept names", () => {
@@ -424,6 +433,22 @@ describe("craft utilities", () => {
     expect(response.status).toBe(400);
   });
 
+  it("recognizes Gemini and Qwen combiner models separately from agent models", () => {
+    expect(isKnownCombinerModel("gemini-2.5-flash")).toBe(true);
+    expect(isKnownCombinerModel("qwen3-4b-dpo-softce")).toBe(true);
+    expect(isQwenCombinerModel("qwen3-4b-dpo-softce")).toBe(true);
+    expect(isQwenCombinerModel("gemini-2.5-flash")).toBe(false);
+    expect(getCombinerModelLabel("qwen3-4b-dpo-softce")).toBe("Qwen DPO SoftCE");
+  });
+
+  it("parses Qwen combiner outputs into clean concepts", () => {
+    expect(parseQwenConcept("steam<|im_end|>")).toBe("steam");
+    expect(parseQwenConcept("\"Concept: Storm   Cloud\"")).toBe("storm cloud");
+    expect(parseQwenConcept("<think>hidden</think>\nResulting concept: Ice Cream")).toBe(
+      "ice cream"
+    );
+  });
+
   it("generates and stores missing dataset recipes with Vertex", async () => {
     process.env.VERTEX_API_KEY = "test-key";
     vi.stubGlobal(
@@ -502,6 +527,104 @@ describe("craft utilities", () => {
 
     expect(response.model).toBe("gemini-2.5-flash-lite");
     expect(capturedUrl).toContain("gemini-2.5-flash-lite");
+  });
+
+  it("generates and stores missing dataset recipes with Qwen", async () => {
+    process.env.QWEN_COMBINER_BASE_URL = "http://qwen.test/v1";
+    process.env.QWEN_COMBINER_API_KEY = "qwen-key";
+    process.env.QWEN_COMBINER_MODEL = "qwen3-4b-dpo-softce";
+    let capturedUrl = "";
+    let capturedBody: unknown;
+    let capturedAuth = "";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init: RequestInit) => {
+        capturedUrl = url;
+        capturedBody = JSON.parse(String(init.body));
+        capturedAuth = String((init.headers as Record<string, string>).Authorization);
+        return {
+          ok: true,
+          json: async () => ({
+            choices: [
+              {
+                message: {
+                  content: "steam",
+                  raw_content: "steam<|im_end|>"
+                }
+              }
+            ]
+          })
+        };
+      })
+    );
+
+    const response = await combineElementsWithDataset({
+      inputA: createElementToken("fire"),
+      inputB: createElementToken("water"),
+      inventory: BASE_ELEMENTS,
+      model: "qwen3-4b-dpo-softce"
+    });
+
+    expect(response.source).toBe("model_generated");
+    expect(response.result.name).toBe("steam");
+    expect(response.result.emoji).toBeUndefined();
+    expect(response.model).toBe("qwen3-4b-dpo-softce");
+    expect(response.rationale).toBeUndefined();
+    expect(capturedUrl).toBe("http://qwen.test/v1/chat/completions");
+    expect(capturedAuth).toBe("Bearer qwen-key");
+    expect(capturedBody).toMatchObject({
+      model: "qwen3-4b-dpo-softce",
+      max_tokens: 16,
+      temperature: 0,
+      messages: [
+        {
+          role: "system",
+          content: "You combine two concepts into one resulting concept."
+        },
+        {
+          role: "user",
+          content:
+            "Given two concepts, combine them into one resulting concept.\n\nConcept A: fire\nConcept B: water\n\nReturn only the resulting concept."
+        }
+      ]
+    });
+    expect(dbMock.generatedDatasetImports[0]).toEqual([
+      "web-generated-qwen3-4b-dpo-softce",
+      "apps/web",
+      JSON.stringify({
+        source: "qwen-vm-web-combinator",
+        model: "qwen3-4b-dpo-softce"
+      })
+    ]);
+  });
+
+  it("rejects invalid Qwen outputs before storing generated recipes", async () => {
+    process.env.QWEN_COMBINER_BASE_URL = "http://qwen.test/v1";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({
+          choices: [
+            {
+              message: {
+                content: "fire"
+              }
+            }
+          ]
+        })
+      }))
+    );
+
+    await expect(
+      combineElementsWithDataset({
+        inputA: createElementToken("fire"),
+        inputB: createElementToken("water"),
+        inventory: BASE_ELEMENTS,
+        model: "qwen3-4b-dpo-softce"
+      })
+    ).rejects.toThrow("Qwen returned one of the input concepts");
+    expect(dbMock.generatedCandidates).toHaveLength(0);
   });
 
   it("uses Pro combine generation settings without zero thinking budget", async () => {
