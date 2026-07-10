@@ -8,15 +8,13 @@ dependencies = [
     "accelerate>=1.14.0",
     "bitsandbytes>=0.49.2",
     "datasets>=5.0.0",
-    "deepagents>=0.6.10",
     "huggingface-hub>=1.19.0",
-    "langchain-google-genai>=4.2.5",
     "matplotlib>=3.10.0",
     "peft>=0.19.1",
     "pydantic>=2.13.0",
     "pyyaml>=6.0.0",
     "python-dotenv>=1.2.2",
-    "tavily-python>=0.7.26",
+    "sentence-transformers>=3.0.1",
     "torch>=2.12.1",
     "transformers>=5.12.1",
     "psycopg[binary]>=3.2.0",
@@ -26,6 +24,38 @@ dependencies = [
 dev = [
     "pytest>=9.0.2",
 ]
+# Agent/teacher-enrichment stack (src/agent, src/data/enrich_*). Heavy (langchain +
+# google-genai). In default-groups so local `uv sync` still installs it.
+agents = [
+    "deepagents>=0.6.10",
+    "langchain-google-genai>=4.2.5",
+    "tavily-python>=0.7.26",
+]
+# Opt-in group: only needed locally to submit Vertex jobs (src/sft/vertex_submit.py).
+# Not installed by default, so local training stays lean. Use: uv sync --group vertex
+vertex = [
+    "anthropic[vertex]>=0.72.0",
+    "google-cloud-aiplatform>=1.71.0",
+    "google-cloud-storage>=2.18.2",
+    "google-genai>=1.35.0",
+]
+
+[tool.uv]
+# Keep local `uv sync` behavior unchanged (installs project + dev + agents).
+default-groups = ["dev", "agents"]
+
+# The default PyPI torch wheel bundles a CUDA 13 runtime (nvidia-*-cu13), which
+# needs a CUDA-13 driver. The Vertex T4/A100 nodes ship a CUDA-12.2 driver, so
+# that wheel falls back to CPU there. Pin the Linux torch build to PyTorch's
+# CUDA-12.6 index (runs on the R525+ driver family, which the 12.2 nodes clear).
+# macOS keeps the default PyPI wheel so local dev and `uv lock` still resolve.
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu126", marker = "sys_platform == 'linux'" }]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

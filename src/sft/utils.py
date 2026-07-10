@@ -145,3 +145,14 @@ def rotate_checkpoints(checkpoints_dir: Path, save_total_limit: int) -> None:
             elif child.is_dir():
                 child.rmdir()
         checkpoint.rmdir()
+
+
+def format_duration(seconds: float) -> str:
+    total_seconds = max(0, int(round(seconds)))
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, secs = divmod(remainder, 60)
+    if hours > 0:
+        return f"{hours}h{minutes:02d}m{secs:02d}s"
+    if minutes > 0:
+        return f"{minutes}m{secs:02d}s"
+    return f"{secs}s"

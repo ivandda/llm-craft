@@ -1,0 +1,29 @@
+# Build the SFT training image and push it to Artifact Registry.
+# Usage:
+#   gcloud builds submit --config cloudbuild.yaml --project nlp2026-498021
+#
+# Override the tag per run if you want immutable images:
+#   gcloud builds submit --config cloudbuild.yaml \
+#     --substitutions _TAG=$(git rev-parse --short HEAD)
+
+substitutions:
+  _REGION: us-central1
+  _REPO: llm-craft-registry
+  _IMAGE: llm-craft-sft
+  _TAG: latest
+
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -t
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_IMAGE}:${_TAG}
+      - .
+
+images:
+  - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_IMAGE}:${_TAG}
+
+# CUDA images are large; give the build a roomier machine and timeout.
+options:
+  machineType: E2_HIGHCPU_8
+timeout: 1800s

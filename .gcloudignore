@@ -1,0 +1,23 @@
+# Upload context for `gcloud builds submit`. Without this file gcloud uploads the
+# whole directory (incl. checkpoints/, runs/, .venv/) as the build context.
+# The image only needs the build files COPYed by the Dockerfile.
+.git/
+.venv/
+.pytest_cache/
+__pycache__/
+*.pyc
+
+# Data, checkpoints and outputs live in GCS, not in the build context.
+datasets/
+checkpoints/
+runs/
+artifacts/
+
+# Unrelated to training.
+apps/
+node_modules/
+docs/
+
+# Local-only.
+.env
+secrets/

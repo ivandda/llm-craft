@@ -11,7 +11,10 @@ def test_smoke_train_with_tiny_model(tmp_path):
     dev_path = tmp_path / "dev.jsonl"
     row = (
         '{"input_a":"fire","input_b":"water","candidate_outputs":'
-        '[{"output":"steam","source":"observed","rank":1},{"output":"vapor","source":"teacher","rank":2}]}\n'
+        '[{"output":"steam","source":"observed","rank":1,'
+        '"rationale":"Fire heats water until it becomes steam."},'
+        '{"output":"vapor","source":"teacher","rank":2,'
+        '"rationale":"Fire heats water into vapor."}]}\n'
     )
     train_path.write_text(row * 2, encoding="utf-8")
     dev_path.write_text(row, encoding="utf-8")
@@ -42,5 +45,9 @@ def test_smoke_train_with_tiny_model(tmp_path):
             "1",
             "--logging_steps",
             "1",
+            "--rationale_loss_weight",
+            "0.2",
+            "--rationale_position",
+            "output_after_rationale",
         ]
     )

@@ -19,6 +19,8 @@ class SFTConfig:
     dev_path: str = "datasets/final-small-dataset/dev.jsonl"
     output_dir: str = "runs/sft"
     run_name: str | None = None
+    prompt_format: str = "plain"
+    system_prompt: str | None = None
     loss_type: str = "concept_set"  # Legacy/convenience alias for the explicit loss axes below.
     ce_target: str = "rank1"  # Legacy no-op kept for backwards compatibility.
     candidate_weighting: str = "dataset"  # Recommended explicit loss axis.
@@ -53,11 +55,24 @@ class SFTConfig:
     max_train_examples: int | None = None
     max_dev_examples: int | None = None
     length_normalize_concept_logprob: bool = False
+    rationale_loss_weight: float = 0.0
+    length_normalize_rationale_logprob: bool = True
+    rationale_position: str = "output_before_rationale"
     weight_field: str = "weight"
     weight_fallback: str = "inverse_rank"
     merge_duplicate_recipes: bool = True
     trust_remote_code: bool = False
     dataloader_num_workers: int = 0
+    # DPO (objective="dpo"). Reuses train_path/dev_path pointing at a DPO pairs.jsonl.
+    # See src/sft/dpo.py. The reference is the SFT policy itself (init_adapter_path),
+    # NOT the base model.
+    objective: str = "sft"  # "sft" | "dpo"
+    init_adapter_path: str | None = None  # SFT/soft_ce adapter: inits the policy AND is the reference
+    dpo_beta: float = 0.1
+    dpo_label_smoothing: float = 0.0
+    dpo_length_normalize: bool = False
+    reference_free: bool = False
+    reference_logprob_source: str = "precompute"  # precompute | ondisk | recompute
 
     def to_dict(self) -> dict[str, Any]:
         return dataclasses.asdict(self)
@@ -148,6 +163,8 @@ def resolve_loss_alias(loss_type: str) -> tuple[str, str]:
 
 def validate_config(config: SFTConfig) -> None:
     resolve_loss_alias(config.loss_type)
+    if config.prompt_format not in {"plain", "qwen_chat"}:
+        raise ValueError("prompt_format must be one of: plain, qwen_chat")
     if config.ce_target not in {"rank1", "observed", "first"}:
         raise ValueError("ce_target must be one of: rank1, observed, first")
     if config.candidate_weighting not in {"uniform", "dataset"}:
@@ -156,7 +173,32 @@ def validate_config(config: SFTConfig) -> None:
         raise ValueError("candidate_aggregation must be one of: expected_logprob, logsumexp_prob")
     if config.weight_fallback not in {"uniform", "inverse_rank"}:
         raise ValueError("weight_fallback must be one of: uniform, inverse_rank")
+    if config.rationale_loss_weight < 0:
+        raise ValueError("rationale_loss_weight must be >= 0")
+    if config.rationale_position not in {"output_before_rationale", "output_after_rationale"}:
+        raise ValueError("rationale_position must be one of: output_before_rationale, output_after_rationale")
     if config.gradient_accumulation_steps < 1:
         raise ValueError("gradient_accumulation_steps must be >= 1")
     if config.per_device_train_batch_size < 1 or config.per_device_eval_batch_size < 1:
         raise ValueError("batch sizes must be >= 1")
+    if config.objective not in {"sft", "dpo"}:
+        raise ValueError("objective must be one of: sft, dpo")
+    if config.objective == "dpo":
+        if config.init_adapter_path is None and config.resume_from_checkpoint is None:
+            raise ValueError(
+                "objective='dpo' requires init_adapter_path (the SFT/soft_ce adapter that "
+                "initializes the policy AND serves as the frozen reference). DPO from the raw "
+                "base model would discard the SFT and regularize toward base."
+            )
+        if config.reference_logprob_source not in {"precompute", "ondisk", "recompute"}:
+            raise ValueError("reference_logprob_source must be one of: precompute, ondisk, recompute")
+        if not config.dpo_beta > 0:
+            raise ValueError("dpo_beta must be > 0")
+        if not 0.0 <= config.dpo_label_smoothing < 0.5:
+            raise ValueError("dpo_label_smoothing must be in [0, 0.5)")
+        if config.lora_dropout != 0.0:
+            print(
+                "[dpo] WARNING: lora_dropout != 0 makes policy log-probs stochastic and not "
+                "comparable to the frozen reference; set lora_dropout=0 for DPO.",
+                flush=True,
+            )

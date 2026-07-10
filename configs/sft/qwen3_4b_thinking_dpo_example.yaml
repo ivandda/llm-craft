@@ -1,0 +1,50 @@
+# DPO desde el adapter soft_ce sobre pares de preferencia (pairs.jsonl).
+# El reference es el propio soft_ce (init_adapter_path), NO el modelo base.
+# Ver docs/codigo/bitacora_experimentos.md y src/sft/dpo.py.
+model_name_or_path: Qwen/Qwen3-4B-Thinking-2507
+objective: dpo
+# Adapter soft_ce: inicializa la política Y sirve de reference congelado. Sobreescribir
+# con --init_adapter_path apuntando al best_adapter/final_adapter del run soft_ce.
+init_adapter_path: /gcs/llm-craft-bucket/runs/2026-07-02_2300_qwen3_4b_thinking_10k_softce/best_adapter
+# train_path/dev_path apuntan al pairs.jsonl de build_dpo_pairs (no al dataset de recetas).
+train_path: /gcs/llm-craft-bucket/dpo/softce_pairs/pairs.jsonl
+dev_path: /gcs/llm-craft-bucket/dpo/softce_pairs/pairs_dev.jsonl
+output_dir: runs/sft
+run_name: qwen3_4b_thinking_dpo_softce
+prompt_format: qwen_chat
+system_prompt: You combine two concepts into one resulting concept.
+# DPO
+dpo_beta: 0.1
+dpo_label_smoothing: 0.0
+dpo_length_normalize: false
+reference_free: false
+reference_logprob_source: precompute
+# Schedule (una época, lr más bajo que SFT).
+num_train_epochs: 1
+max_steps: -1
+per_device_train_batch_size: 1
+per_device_eval_batch_size: 1
+gradient_accumulation_steps: 8
+learning_rate: 5.0e-5
+weight_decay: 0.0
+warmup_ratio: 0.1
+max_seq_length: 512  # el 'rejected' verboso puede pasar 256; subir si dispara el guard de truncado
+max_grad_norm: 1.0
+logging_steps: 10
+eval_steps: 100
+save_steps: 200
+save_total_limit: 3
+seed: 42
+bf16: true
+fp16: false
+gradient_checkpointing: true
+load_in_4bit: true
+lora_r: 16
+lora_alpha: 32
+lora_dropout: 0.0  # DPO: 0 para que los logps de la política sean comparables al reference congelado
+lora_target_modules: auto
+resume_from_checkpoint: null
+max_train_examples: null
+max_dev_examples: null
+trust_remote_code: false
+dataloader_num_workers: 0
