@@ -1,9 +1,14 @@
 import type {
   AuthUser,
+  AgentTestReport,
+  AgentTestRequest,
   CombineRequest,
   CombineResponse,
+  DpoPreferenceRequest,
   FeaturedAchievement,
+  GoalPreset,
   LeaderboardEntry,
+  RandomGoalRequest,
   UserProfile
 } from "@/lib/types";
 
@@ -28,6 +33,34 @@ export async function requestCombination(
   }
 
   return response.json() as Promise<CombineResponse>;
+}
+
+export async function requestRandomGoal(
+  request: RandomGoalRequest
+): Promise<GoalPreset> {
+  const payload = await requestJson<{ goal: GoalPreset }>(
+    "/api/goals/random",
+    request
+  );
+
+  return payload.goal;
+}
+
+export async function requestAgentTestRun(
+  request: AgentTestRequest
+): Promise<AgentTestReport> {
+  const payload = await requestJson<{ report: AgentTestReport }>(
+    "/api/agent-test/run",
+    request
+  );
+
+  return payload.report;
+}
+
+export async function requestDpoPreference(
+  request: DpoPreferenceRequest
+): Promise<void> {
+  await requestJson("/api/dpo/preferences", request);
 }
 
 export async function requestCurrentSession(): Promise<AuthSession | null> {

@@ -15,6 +15,28 @@ uv sync
 
 ---
 
+## Base de datos local
+
+La app web y los splits `train`/`dev`/`test` del dataset curado `final-10k`
+usan Postgres local con Docker. Los datos persisten en `var/postgres-data/`,
+fuera de git.
+
+```bash
+docker compose up -d postgres
+uv run python -m src.data.db_migrate
+uv run python -m src.data.import_final10k_to_postgres --replace-dataset final-10k
+```
+
+La URL por defecto es:
+
+```text
+postgres://llm_craft:llm_craft_dev@localhost:5432/llm_craft
+```
+
+La guía completa está en [postgres_dataset_db.md](docs/codigo/postgres_dataset_db.md).
+
+---
+
 ## Ejecución del Pipeline completo
 
 Puedes ejecutar todo el pipeline de procesamiento de datos secuencialmente usando el script maestro:
@@ -587,12 +609,18 @@ La guía completa (prerrequisitos, permisos, cuota de GPU, overrides y descarga 
 
 ## Frontend
 
-La interfaz jugable vive en `apps/web` como una app Next.js preparada para conectar modelos más adelante mediante contratos mock tipados. Incluye registro/login mock en memoria con credenciales seeded `admin/admin`, menu de modos (`Sandbox` y `Goal`), perfil con logros destacados y leaderboard mock para objetivos completados.
+La interfaz jugable vive en `apps/web` como una app Next.js. El combinador consulta recetas en Postgres y usa Vertex AI con `VERTEX_API_KEY` o `GOOGLE_APPLICATION_CREDENTIALS` para generar y guardar combinaciones nuevas cuando el par no existe en la base. `Sandbox` y `Goal` permiten elegir el modelo Gemini del combinador (`Gemini 2.5 Flash`, `Gemini 2.5 Pro` o `Gemini 2.5 Flash Lite`); esa seleccion solo aplica a combinaciones generadas por modelo, porque las recetas conocidas de `final-10k` siempre tienen prioridad para mantener resultados deterministas. Incluye registro/login mock con credenciales seeded `admin/admin`, menu de modos (`Sandbox`, `Goal` y `Agent Test`), metas alcanzables por profundidad con inventario inicial variable, controles internos para reiniciar o generar otra meta en `Goal`, un modo de prueba donde un agente usa el combinador hasta 20 mezclas, `DPO test mode`, perfil con logros destacados y leaderboard para objetivos completados.
 
 ```bash
 cd apps/web
 npm ci
 npm run dev
+```
+
+Para configurar Vertex en desarrollo:
+
+```bash
+cp .env.example .env.local
 ```
 
 Para validar el frontend:

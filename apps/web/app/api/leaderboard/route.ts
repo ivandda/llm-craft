@@ -10,11 +10,11 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Missing goalId" }, { status: 400 });
   }
 
-  return NextResponse.json({ entries: listLeaderboard(goalId) });
+  return NextResponse.json({ entries: await listLeaderboard(goalId) });
 }
 
 export async function POST(request: Request) {
-  const session = getUserBySession(readCookie(request, SESSION_COOKIE_NAME));
+  const session = await getUserBySession(readCookie(request, SESSION_COOKIE_NAME));
 
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -38,7 +38,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const entry = saveLeaderboardEntry({
+  const entry = await saveLeaderboardEntry({
     user: session.user,
     goalId: payload.goalId,
     goalTitle: payload.goalTitle,
@@ -47,7 +47,7 @@ export async function POST(request: Request) {
 
   return NextResponse.json({
     entry,
-    entries: listLeaderboard(payload.goalId)
+    entries: await listLeaderboard(payload.goalId)
   });
 }
 

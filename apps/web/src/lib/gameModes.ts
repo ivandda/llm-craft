@@ -2,20 +2,24 @@ import { BASE_ELEMENTS, createElementToken } from "@/lib/craft";
 import type { ElementToken, GameMode, GoalPreset } from "@/lib/types";
 
 const GOAL_STARTERS: ElementToken[] = [
-  createElementToken("earth", "🌍"),
-  createElementToken("rain", "🌧️")
+  createElementToken("earth"),
+  createElementToken("rain")
 ];
 
 export const GOAL_PRESET: GoalPreset = {
-  id: "first-garden",
+  id: "fallback-first-plant",
   mode: "goal",
-  title: "First Garden",
-  description: "A static mock goal ready for future backend validation.",
+  title: "First Plant",
+  description: "Fallback goal used when random generation is unavailable.",
   objective: "Discover plant from earth and rain.",
-  target: createElementToken("plant", "🌱"),
+  target: createElementToken("plant"),
   metadata: {
     difficulty: "intro",
-    status: "mock"
+    status: "mock",
+    depth: 1,
+    minDepth: 1,
+    strategy: "fallback",
+    initialInventoryId: "growth"
   },
   initialInventory: GOAL_STARTERS
 };

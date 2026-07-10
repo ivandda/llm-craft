@@ -5,9 +5,15 @@ import {
   requestLogin,
   requestLogout,
   requestProfileUpdate,
+  requestRandomGoal,
   requestRegister,
   type AuthSession
 } from "@/lib/api";
+import {
+  DEFAULT_VERTEX_MODEL,
+  isKnownVertexModel,
+  VERTEX_MODEL_OPTIONS
+} from "@/lib/agentModels";
 import { GOAL_PRESET } from "@/lib/gameModes";
 import {
   FEATURED_ACHIEVEMENT_LIMIT,
@@ -17,12 +23,15 @@ import type {
   AuthUser,
   GameMode,
   GameSnapshot,
+  GoalPreset,
   UserProfile
 } from "@/lib/types";
+import { AgentTest } from "@/components/AgentTest";
 import { CraftGame } from "@/components/CraftGame";
 import {
   ArrowLeft,
   BadgeCheck,
+  Bot,
   LogIn,
   LogOut,
   Play,
@@ -47,9 +56,18 @@ const EMPTY_SNAPSHOT: GameSnapshot = {
 export function AppShell() {
   const [session, setSession] = useState<AuthSession | null>(null);
   const [selectedMode, setSelectedMode] = useState<GameMode | null>(null);
+  const [goalDepth, setGoalDepth] = useState(3);
+  const [selectedCombinerModel, setSelectedCombinerModel] =
+    useState(DEFAULT_VERTEX_MODEL);
+  const [hasHydratedCombinerModel, setHasHydratedCombinerModel] = useState(false);
+  const [activeGoalPreset, setActiveGoalPreset] = useState<GoalPreset>(GOAL_PRESET);
   const [snapshot, setSnapshot] = useState<GameSnapshot>(EMPTY_SNAPSHOT);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isLoadingSession, setIsLoadingSession] = useState(true);
+  const [isGeneratingGoal, setIsGeneratingGoal] = useState(false);
+  const [goalGenerationMessage, setGoalGenerationMessage] = useState<string | null>(
+    null
+  );
 
   useEffect(() => {
     requestCurrentSession()
@@ -57,12 +75,68 @@ export function AppShell() {
       .finally(() => setIsLoadingSession(false));
   }, []);
 
+  useEffect(() => {
+    if (!session) {
+      setHasHydratedCombinerModel(false);
+      return;
+    }
+
+    setSelectedCombinerModel(
+      readStoredModel(createCombinerModelStorageKey(session.user.id))
+    );
+    setHasHydratedCombinerModel(true);
+  }, [session?.user.id]);
+
+  useEffect(() => {
+    if (!session || !hasHydratedCombinerModel) {
+      return;
+    }
+
+    window.localStorage.setItem(
+      createCombinerModelStorageKey(session.user.id),
+      JSON.stringify(selectedCombinerModel)
+    );
+  }, [hasHydratedCombinerModel, selectedCombinerModel, session]);
+
   async function handleLogout() {
     await requestLogout();
     setSession(null);
     setSelectedMode(null);
+    setActiveGoalPreset(GOAL_PRESET);
     setSnapshot(EMPTY_SNAPSHOT);
     setIsProfileOpen(false);
+  }
+
+  async function generateNewGoal(): Promise<GoalPreset> {
+    setIsGeneratingGoal(true);
+    setGoalGenerationMessage(null);
+
+    try {
+      const nextGoal = await requestRandomGoal({ depth: goalDepth });
+      setActiveGoalPreset(nextGoal);
+      return nextGoal;
+    } catch {
+      setActiveGoalPreset(GOAL_PRESET);
+      setGoalGenerationMessage("Random goal unavailable. Using fallback goal.");
+      return GOAL_PRESET;
+    } finally {
+      setIsGeneratingGoal(false);
+    }
+  }
+
+  async function handleSelectMode(mode: GameMode) {
+    if (mode === "sandbox") {
+      setSelectedMode("sandbox");
+      return;
+    }
+
+    if (mode === "agent-test") {
+      setSelectedMode("agent-test");
+      return;
+    }
+
+    await generateNewGoal();
+    setSelectedMode("goal");
   }
 
   if (isLoadingSession) {
@@ -90,19 +164,43 @@ export function AppShell() {
     return (
       <ModeMenu
         user={session.user}
+        goalDepth={goalDepth}
+        goalGenerationMessage={goalGenerationMessage}
+        isGeneratingGoal={isGeneratingGoal}
+        selectedCombinerModel={selectedCombinerModel}
+        onGoalDepthChange={setGoalDepth}
         onLogout={handleLogout}
+        onCombinerModelChange={setSelectedCombinerModel}
         onOpenProfile={() => setIsProfileOpen(true)}
-        onSelectMode={setSelectedMode}
+        onSelectMode={handleSelectMode}
+      />
+    );
+  }
+
+  if (selectedMode === "agent-test") {
+    return (
+      <AgentTest
+        goalDepth={goalDepth}
+        user={session.user}
+        onBackToMenu={() => setSelectedMode(null)}
+        onGoalDepthChange={setGoalDepth}
+        onLogout={handleLogout}
       />
     );
   }
 
   return (
     <CraftGame
-      goalPreset={GOAL_PRESET}
+      goalPreset={activeGoalPreset}
+      goalDepth={goalDepth}
+      goalGenerationMessage={goalGenerationMessage}
+      selectedCombinerModel={selectedCombinerModel}
+      isGeneratingGoal={isGeneratingGoal}
       mode={selectedMode}
       user={session.user}
       onBackToMenu={() => setSelectedMode(null)}
+      onGenerateNewGoal={generateNewGoal}
+      onGoalDepthChange={setGoalDepth}
       onLogout={handleLogout}
       onOpenProfile={(nextSnapshot) => {
         setSnapshot(nextSnapshot);
@@ -234,15 +332,27 @@ function AuthPanel({ onAuthenticated }: { onAuthenticated: (session: AuthSession
 }
 
 function ModeMenu({
+  goalDepth,
+  goalGenerationMessage,
+  isGeneratingGoal,
+  selectedCombinerModel,
   user,
+  onGoalDepthChange,
+  onCombinerModelChange,
   onLogout,
   onOpenProfile,
   onSelectMode
 }: {
+  goalDepth: number;
+  goalGenerationMessage: string | null;
+  isGeneratingGoal: boolean;
+  selectedCombinerModel: string;
   user: AuthUser;
+  onGoalDepthChange: (depth: number) => void;
+  onCombinerModelChange: (model: string) => void;
   onLogout: () => void;
   onOpenProfile: () => void;
-  onSelectMode: (mode: GameMode) => void;
+  onSelectMode: (mode: GameMode) => void | Promise<void>;
 }) {
   return (
     <main className="min-h-screen bg-[#f6f2e8] px-4 py-6 text-zinc-950">
@@ -262,7 +372,7 @@ function ModeMenu({
           </div>
         </header>
 
-        <section className="grid flex-1 gap-4 md:grid-cols-2">
+        <section className="grid flex-1 gap-4 lg:grid-cols-3">
           <ModeCard
             accentClassName="border-amber-300 bg-amber-50 hover:border-amber-400 hover:bg-amber-100"
             icon={<Sparkles size={22} />}
@@ -274,21 +384,91 @@ function ModeMenu({
           />
           <ModeCard
             accentClassName="border-sky-300 bg-sky-50 hover:border-sky-400 hover:bg-sky-100"
+            disabled={isGeneratingGoal}
             icon={<Target size={22} />}
-            modeLabel={GOAL_PRESET.objective}
+            modeLabel={`Random goal at depth ${goalDepth}`}
             previewElements={["🧭", "🛤️", "📍", "🎯"]}
             resultElement="🏁"
-            label="Goal"
+            label={isGeneratingGoal ? "Generating" : "Goal"}
             onClick={() => onSelectMode("goal")}
           />
+          <ModeCard
+            accentClassName="border-emerald-300 bg-emerald-50 hover:border-emerald-400 hover:bg-emerald-100"
+            compactPreview
+            icon={<Bot size={22} />}
+            modeLabel={`Agent run at depth ${goalDepth}`}
+            previewElements={["🤖"]}
+            resultElement="🤖"
+            label="Agent Test"
+            onClick={() => onSelectMode("agent-test")}
+          />
         </section>
+        <div className="flex flex-wrap items-center gap-3 rounded-md border border-sky-200 bg-white/80 px-4 py-3 shadow-hairline">
+          <label className="flex items-center gap-3 text-sm font-semibold text-zinc-700">
+            <span>Goal depth</span>
+            <select
+              className="h-9 rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-zinc-500"
+              disabled={isGeneratingGoal}
+              onChange={(event) => onGoalDepthChange(Number(event.target.value))}
+              value={goalDepth}
+            >
+              {Array.from({ length: 10 }, (_, index) => index + 1).map((value) => (
+                <option key={value} value={value}>
+                  {value}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex min-w-[240px] items-center gap-3 text-sm font-semibold text-zinc-700">
+            <span>Combiner model</span>
+            <select
+              className="h-9 min-w-0 flex-1 rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-zinc-500"
+              onChange={(event) => onCombinerModelChange(event.target.value)}
+              value={selectedCombinerModel}
+            >
+              {VERTEX_MODEL_OPTIONS.map((model) => (
+                <option key={model.id} value={model.id}>
+                  {model.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          {goalGenerationMessage ? (
+            <p className="text-sm text-amber-700">{goalGenerationMessage}</p>
+          ) : null}
+        </div>
       </div>
     </main>
   );
 }
 
+function createCombinerModelStorageKey(userId: string): string {
+  return `llm-craft.v2.${normalizeStorageSegment(userId)}.combinerModel`;
+}
+
+function readStoredModel(key: string): string {
+  const rawValue = window.localStorage.getItem(key);
+
+  if (!rawValue) {
+    return DEFAULT_VERTEX_MODEL;
+  }
+
+  try {
+    const model = JSON.parse(rawValue) as unknown;
+    return isKnownVertexModel(model) ? model : DEFAULT_VERTEX_MODEL;
+  } catch {
+    return DEFAULT_VERTEX_MODEL;
+  }
+}
+
+function normalizeStorageSegment(value: string): string {
+  return value.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "-") || "anonymous";
+}
+
 function ModeCard({
   accentClassName,
+  disabled = false,
+  compactPreview = false,
   icon,
   label,
   modeLabel,
@@ -297,6 +477,8 @@ function ModeCard({
   resultElement
 }: {
   accentClassName: string;
+  disabled?: boolean;
+  compactPreview?: boolean;
   icon: ReactNode;
   label: string;
   modeLabel: string;
@@ -307,6 +489,7 @@ function ModeCard({
   return (
     <button
       className={`group relative min-h-[360px] overflow-hidden rounded-md border-2 p-5 text-left shadow-hairline transition duration-200 hover:-translate-y-1 hover:shadow-xl active:translate-y-0 ${accentClassName}`}
+      disabled={disabled}
       onClick={onClick}
       type="button"
     >
@@ -326,24 +509,32 @@ function ModeCard({
         </div>
 
         <div className="grid gap-5">
-          <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3">
-            <div className="grid grid-cols-2 gap-2">
-              {previewElements.map((element, index) => (
-                <span
-                  className="grid aspect-square place-items-center rounded-md border border-zinc-300 bg-white/85 text-3xl shadow-sm transition duration-200 group-hover:-translate-y-1 group-hover:rotate-2"
-                  key={`${element}-${index}`}
-                >
-                  {element}
-                </span>
-              ))}
+          {compactPreview ? (
+            <div className="grid place-items-center py-6">
+              <span className="grid size-36 place-items-center rounded-md border border-emerald-300 bg-white text-7xl shadow-md transition duration-200 group-hover:-translate-y-2 group-hover:rotate-3">
+                {resultElement}
+              </span>
             </div>
-            <span className="grid size-12 place-items-center rounded-md border border-zinc-300 bg-white/80 text-zinc-600 transition group-hover:scale-110">
-              <Play size={18} />
-            </span>
-            <span className="grid aspect-square place-items-center rounded-md border border-zinc-300 bg-white text-5xl shadow-md transition duration-200 group-hover:-translate-y-2 group-hover:rotate-3">
-              {resultElement}
-            </span>
-          </div>
+          ) : (
+            <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3">
+              <div className="grid grid-cols-2 gap-2">
+                {previewElements.map((element, index) => (
+                  <span
+                    className="grid aspect-square place-items-center rounded-md border border-zinc-300 bg-white/85 text-3xl shadow-sm transition duration-200 group-hover:-translate-y-1 group-hover:rotate-2"
+                    key={`${element}-${index}`}
+                  >
+                    {element}
+                  </span>
+                ))}
+              </div>
+              <span className="grid size-12 place-items-center rounded-md border border-zinc-300 bg-white/80 text-zinc-600 transition group-hover:scale-110">
+                <Play size={18} />
+              </span>
+              <span className="grid aspect-square place-items-center rounded-md border border-zinc-300 bg-white text-5xl shadow-md transition duration-200 group-hover:-translate-y-2 group-hover:rotate-3">
+                {resultElement}
+              </span>
+            </div>
+          )}
 
           <div className="flex items-center justify-between gap-3 rounded-md border border-zinc-300 bg-white/80 px-4 py-3">
             <span className="text-sm font-semibold text-zinc-700">Play</span>
@@ -354,16 +545,18 @@ function ModeCard({
         </div>
       </div>
 
-      <div className="pointer-events-none absolute -bottom-10 -right-8 grid grid-cols-3 gap-2 opacity-30 transition duration-200 group-hover:-translate-y-2 group-hover:opacity-45">
-        {previewElements.concat(resultElement).map((element, index) => (
-          <span
-            className="grid size-12 place-items-center rounded-md border border-zinc-300 bg-white text-xl"
-            key={`${element}-ghost-${index}`}
-          >
-            {element}
-          </span>
-        ))}
-      </div>
+      {!compactPreview ? (
+        <div className="pointer-events-none absolute -bottom-10 -right-8 grid grid-cols-3 gap-2 opacity-30 transition duration-200 group-hover:-translate-y-2 group-hover:opacity-45">
+          {previewElements.concat(resultElement).map((element, index) => (
+            <span
+              className="grid size-12 place-items-center rounded-md border border-zinc-300 bg-white text-xl"
+              key={`${element}-ghost-${index}`}
+            >
+              {element}
+            </span>
+          ))}
+        </div>
+      ) : null}
     </button>
   );
 }

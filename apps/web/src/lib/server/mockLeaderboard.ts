@@ -1,59 +1,93 @@
+import { query } from "@/lib/server/db";
 import type { AuthUser, LeaderboardEntry } from "@/lib/types";
 
-type LeaderboardStore = {
-  entriesByGoalAndUser: Map<string, LeaderboardEntry>;
+type LeaderboardRow = {
+  id: string;
+  goal_id: string;
+  goal_title: string;
+  user_id: string;
+  username: string;
+  display_name: string;
+  combinations_used: number;
+  completed_at: Date;
 };
 
-declare global {
-  var llmCraftMockLeaderboardStore: LeaderboardStore | undefined;
+export async function listLeaderboard(goalId: string): Promise<LeaderboardEntry[]> {
+  const result = await query<LeaderboardRow>(
+    `
+    SELECT id, goal_id, goal_title, user_id, username, display_name,
+      combinations_used, completed_at
+    FROM leaderboard_entries
+    WHERE goal_id = $1
+    ORDER BY combinations_used ASC, completed_at ASC
+    LIMIT 20
+    `,
+    [goalId]
+  );
+
+  return result.rows.map(toLeaderboardEntry);
 }
 
-function getStore(): LeaderboardStore {
-  globalThis.llmCraftMockLeaderboardStore ??= {
-    entriesByGoalAndUser: new Map()
-  };
-
-  return globalThis.llmCraftMockLeaderboardStore;
-}
-
-export function listLeaderboard(goalId: string): LeaderboardEntry[] {
-  return [...getStore().entriesByGoalAndUser.values()]
-    .filter((entry) => entry.goalId === goalId)
-    .sort((left, right) => {
-      if (left.combinationsUsed !== right.combinationsUsed) {
-        return left.combinationsUsed - right.combinationsUsed;
-      }
-
-      return left.completedAt.localeCompare(right.completedAt);
-    })
-    .slice(0, 20);
-}
-
-export function saveLeaderboardEntry(input: {
+export async function saveLeaderboardEntry(input: {
   user: AuthUser;
   goalId: string;
   goalTitle: string;
   combinationsUsed: number;
-}): LeaderboardEntry {
-  const store = getStore();
+}): Promise<LeaderboardEntry> {
   const entryKey = `${input.goalId}:${input.user.id}`;
-  const currentEntry = store.entriesByGoalAndUser.get(entryKey);
+  const result = await query<LeaderboardRow>(
+    `
+    INSERT INTO leaderboard_entries (
+      id, goal_id, goal_title, user_id, username, display_name, combinations_used
+    )
+    VALUES ($1, $2, $3, $4, $5, $6, $7)
+    ON CONFLICT (goal_id, user_id) DO UPDATE SET
+      goal_title = EXCLUDED.goal_title,
+      username = EXCLUDED.username,
+      display_name = EXCLUDED.display_name,
+      combinations_used = EXCLUDED.combinations_used,
+      completed_at = now()
+    WHERE leaderboard_entries.combinations_used > EXCLUDED.combinations_used
+    RETURNING id, goal_id, goal_title, user_id, username, display_name,
+      combinations_used, completed_at
+    `,
+    [
+      entryKey,
+      input.goalId,
+      input.goalTitle,
+      input.user.id,
+      input.user.username,
+      input.user.displayName,
+      input.combinationsUsed
+    ]
+  );
 
-  if (currentEntry && currentEntry.combinationsUsed <= input.combinationsUsed) {
-    return currentEntry;
+  if (result.rows[0]) {
+    return toLeaderboardEntry(result.rows[0]);
   }
 
-  const entry: LeaderboardEntry = {
-    id: entryKey,
-    goalId: input.goalId,
-    goalTitle: input.goalTitle,
-    userId: input.user.id,
-    username: input.user.username,
-    displayName: input.user.displayName,
-    combinationsUsed: input.combinationsUsed,
-    completedAt: new Date().toISOString()
-  };
+  const current = await query<LeaderboardRow>(
+    `
+    SELECT id, goal_id, goal_title, user_id, username, display_name,
+      combinations_used, completed_at
+    FROM leaderboard_entries
+    WHERE goal_id = $1 AND user_id = $2
+    `,
+    [input.goalId, input.user.id]
+  );
 
-  store.entriesByGoalAndUser.set(entryKey, entry);
-  return entry;
+  return toLeaderboardEntry(current.rows[0]);
+}
+
+function toLeaderboardEntry(row: LeaderboardRow): LeaderboardEntry {
+  return {
+    id: row.id,
+    goalId: row.goal_id,
+    goalTitle: row.goal_title,
+    userId: row.user_id,
+    username: row.username,
+    displayName: row.display_name,
+    combinationsUsed: row.combinations_used,
+    completedAt: row.completed_at.toISOString()
+  };
 }
