@@ -306,6 +306,60 @@ export function CraftGame({
     onSnapshotChange?.({ inventory, history });
   }, [history, inventory, onSnapshotChange]);
 
+  // Initial board positions are precomputed for a wide board; on a narrow
+  // phone (or after an orientation change) they would strand tokens off the
+  // right edge. Clamp tokens into view on mount and when the board's WIDTH
+  // changes — deliberately ignoring height, because mobile browser chrome
+  // constantly changes the dvh-based height and clamping on that jitter would
+  // slowly migrate tokens toward the top-left (and persist the damage).
+  useEffect(() => {
+    const board = boardRef.current;
+
+    if (!board || !hasHydratedStorage) {
+      return;
+    }
+
+    let lastWidth = 0;
+
+    const clampIntoViewOnWidthChange = () => {
+      // Never reposition while dragging — it would yank the token under the
+      // pointer out from under the user.
+      if (dragStateRef.current) {
+        return;
+      }
+
+      const rect = board.getBoundingClientRect();
+
+      if (rect.width === 0 || rect.height === 0 || rect.width === lastWidth) {
+        return;
+      }
+
+      lastWidth = rect.width;
+
+      setBoardElements((currentElements) => {
+        let hasChanges = false;
+        const nextElements = currentElements.map((element) => {
+          const clamped = clampBoardPosition(element.x, element.y, rect);
+
+          if (clamped.x !== element.x || clamped.y !== element.y) {
+            hasChanges = true;
+            return { ...element, x: clamped.x, y: clamped.y };
+          }
+
+          return element;
+        });
+
+        return hasChanges ? nextElements : currentElements;
+      });
+    };
+
+    clampIntoViewOnWidthChange();
+    const observer = new ResizeObserver(clampIntoViewOnWidthChange);
+    observer.observe(board);
+
+    return () => observer.disconnect();
+  }, [hasHydratedStorage]);
+
   useEffect(() => {
     return () => {
       if (sweepTimeoutRef.current !== null) {
@@ -922,11 +976,11 @@ export function CraftGame({
 
   return (
     <main
-      className={`h-screen overflow-hidden ${
+      className={`h-[100dvh] overflow-hidden ${
         isDarkMode ? "dark bg-zinc-950 text-zinc-50" : "bg-paper text-ink"
       }`}
     >
-      <div className="grid h-screen grid-cols-1 grid-rows-[minmax(0,1fr)_minmax(0,42vh)] overflow-hidden lg:grid-cols-[minmax(0,1fr)_320px] lg:grid-rows-1">
+      <div className="grid h-[100dvh] grid-cols-1 grid-rows-[minmax(0,1fr)_minmax(0,44dvh)] overflow-hidden lg:grid-cols-[minmax(0,1fr)_320px] lg:grid-rows-1">
         <section className="relative min-h-0 overflow-hidden border-b border-linen bg-paper dark:border-zinc-800 dark:bg-zinc-900 lg:border-b-0 lg:border-r">
           <div className="absolute left-4 top-4 z-30 flex items-center gap-3 rounded-md border border-linen bg-surface/90 px-3 py-2 shadow-hairline backdrop-blur dark:border-zinc-700 dark:bg-zinc-950/85">
             <button
@@ -1354,8 +1408,8 @@ function DpoChoiceModal({
   onSkip: () => void;
 }) {
   return (
-    <div className="fixed inset-0 z-[2147483647] grid place-items-center bg-ink/45 px-4 backdrop-blur-sm">
-      <div className="w-full max-w-xl rounded-md border border-linen bg-surface p-5 text-ink shadow-lift">
+    <div className="fixed inset-0 z-[2147483647] grid place-items-center overflow-y-auto bg-ink/45 px-4 py-6 backdrop-blur-sm">
+      <div className="my-auto max-h-[calc(100dvh-3rem)] w-full max-w-xl overflow-y-auto rounded-md border border-linen bg-surface p-5 text-ink shadow-lift">
         <div>
           <p className="font-mono text-xs font-semibold uppercase tracking-wider text-cobalt">
             Help train the AI
@@ -1459,8 +1513,8 @@ function GoalCelebration({
       : null;
 
   return (
-    <div className="fixed inset-0 z-[2147483647] grid place-items-center bg-ink/45 px-4 backdrop-blur-sm">
-      <div className="w-full max-w-lg rounded-md border border-linen bg-surface p-5 text-ink shadow-lift">
+    <div className="fixed inset-0 z-[2147483647] grid place-items-center overflow-y-auto bg-ink/45 px-4 py-6 backdrop-blur-sm">
+      <div className="my-auto max-h-[calc(100dvh-3rem)] w-full max-w-lg overflow-y-auto rounded-md border border-linen bg-surface p-5 text-ink shadow-lift">
         <div className="flex items-start justify-between gap-4">
           <div>
             <p className="font-mono text-xs font-semibold uppercase tracking-wider text-cobalt">

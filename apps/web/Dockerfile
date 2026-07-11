@@ -18,6 +18,9 @@ ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 COPY --from=build /app/.next/standalone ./
 COPY --from=build /app/.next/static ./.next/static
+# Static assets (PWA manifest, icons, service worker) live in public/ and are
+# NOT bundled into the standalone output, so copy them explicitly.
+COPY --from=build /app/public ./public
 ENV PORT=8080
 EXPOSE 8080
 CMD ["node", "server.js"]

@@ -186,7 +186,7 @@ export function AgentTest({
   }
 
   return (
-    <main className="min-h-screen bg-paper px-4 py-6 text-ink">
+    <main className="min-h-[100dvh] bg-paper px-4 py-6 text-ink">
       <div className="mx-auto grid max-w-6xl gap-5">
         <header className="flex flex-wrap items-center justify-between gap-3 border-b border-linen pb-4">
           <div>
