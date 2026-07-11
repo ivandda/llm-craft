@@ -2,6 +2,7 @@
 
 import {
   requestCurrentSession,
+  requestGuestSession,
   requestLogin,
   requestLogout,
   requestProfileUpdate,
@@ -9,6 +10,7 @@ import {
   requestRegister,
   type AuthSession
 } from "@/lib/api";
+import { isGuestUser } from "@/lib/guests";
 import {
   COMBINER_MODEL_OPTIONS,
   DEFAULT_COMBINER_MODEL,
@@ -41,12 +43,14 @@ import {
   UserPlus
 } from "lucide-react";
 import {
+  type CSSProperties,
   type FormEvent,
   type ReactNode,
   useEffect,
   useMemo,
   useState
 } from "react";
+import { getHueForConcept } from "@/lib/emoji";
 
 const EMPTY_SNAPSHOT: GameSnapshot = {
   inventory: [],
@@ -64,15 +68,37 @@ export function AppShell() {
   const [snapshot, setSnapshot] = useState<GameSnapshot>(EMPTY_SNAPSHOT);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isLoadingSession, setIsLoadingSession] = useState(true);
+  const [isAuthPanelOpen, setIsAuthPanelOpen] = useState(false);
   const [isGeneratingGoal, setIsGeneratingGoal] = useState(false);
   const [goalGenerationMessage, setGoalGenerationMessage] = useState<string | null>(
     null
   );
 
   useEffect(() => {
-    requestCurrentSession()
-      .then((nextSession) => setSession(nextSession))
-      .finally(() => setIsLoadingSession(false));
+    let cancelled = false;
+
+    async function bootstrapSession() {
+      try {
+        const existingSession = await requestCurrentSession();
+        const nextSession = existingSession ?? (await requestGuestSession());
+
+        if (!cancelled) {
+          setSession(nextSession);
+        }
+      } catch {
+        // Leave session null; the auth panel becomes the fallback.
+      } finally {
+        if (!cancelled) {
+          setIsLoadingSession(false);
+        }
+      }
+    }
+
+    bootstrapSession();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -100,19 +126,32 @@ export function AppShell() {
 
   async function handleLogout() {
     await requestLogout();
-    setSession(null);
     setSelectedMode(null);
     setActiveGoalPreset(GOAL_PRESET);
     setSnapshot(EMPTY_SNAPSHOT);
     setIsProfileOpen(false);
+    setIsAuthPanelOpen(false);
+
+    try {
+      setSession(await requestGuestSession());
+    } catch {
+      setSession(null);
+    }
   }
 
-  async function generateNewGoal(): Promise<GoalPreset> {
+  async function generateNewGoal(options?: { fresh?: boolean }): Promise<GoalPreset> {
     setIsGeneratingGoal(true);
     setGoalGenerationMessage(null);
 
     try {
-      const nextGoal = await requestRandomGoal({ depth: goalDepth });
+      // The default (daily) seed gives everyone the same goal for the
+      // leaderboard; "New goal" asks for a fresh random one instead.
+      const nextGoal = await requestRandomGoal({
+        depth: goalDepth,
+        seed: options?.fresh
+          ? Math.random().toString(36).slice(2, 10)
+          : undefined
+      });
       setActiveGoalPreset(nextGoal);
       return nextGoal;
     } catch {
@@ -143,8 +182,16 @@ export function AppShell() {
     return <LoadingScreen />;
   }
 
-  if (!session) {
-    return <AuthPanel onAuthenticated={setSession} />;
+  if (!session || isAuthPanelOpen) {
+    return (
+      <AuthPanel
+        onAuthenticated={(nextSession) => {
+          setSession(nextSession);
+          setIsAuthPanelOpen(false);
+        }}
+        onDismiss={session ? () => setIsAuthPanelOpen(false) : undefined}
+      />
+    );
   }
 
   if (isProfileOpen) {
@@ -173,6 +220,9 @@ export function AppShell() {
         onCombinerModelChange={setSelectedCombinerModel}
         onOpenProfile={() => setIsProfileOpen(true)}
         onSelectMode={handleSelectMode}
+        onSignIn={
+          isGuestUser(session.user) ? () => setIsAuthPanelOpen(true) : undefined
+        }
       />
     );
   }
@@ -199,7 +249,7 @@ export function AppShell() {
       mode={selectedMode}
       user={session.user}
       onBackToMenu={() => setSelectedMode(null)}
-      onGenerateNewGoal={generateNewGoal}
+      onGenerateNewGoal={() => generateNewGoal({ fresh: true })}
       onGoalDepthChange={setGoalDepth}
       onLogout={handleLogout}
       onOpenProfile={(nextSnapshot) => {
@@ -213,15 +263,29 @@ export function AppShell() {
 
 function LoadingScreen() {
   return (
-    <main className="grid min-h-screen place-items-center bg-stone-100 px-6 text-zinc-950">
-      <div className="rounded-md border border-zinc-200 bg-white px-5 py-4 text-sm text-zinc-600 shadow-hairline">
-        Loading session.
+    <main className="grid min-h-[100dvh] place-items-center bg-paper px-6 text-ink">
+      <div className="rounded-md border border-linen bg-surface px-5 py-4 text-sm text-soot shadow-hairline">
+        Setting up your workbench…
       </div>
     </main>
   );
 }
 
-function AuthPanel({ onAuthenticated }: { onAuthenticated: (session: AuthSession) => void }) {
+function Wordmark({ className = "text-xl" }: { className?: string }) {
+  return (
+    <span className={`font-display font-bold tracking-tight ${className}`}>
+      llm<span className="text-cobalt">·</span>craft
+    </span>
+  );
+}
+
+function AuthPanel({
+  onAuthenticated,
+  onDismiss
+}: {
+  onAuthenticated: (session: AuthSession) => void;
+  onDismiss?: () => void;
+}) {
   const [mode, setMode] = useState<"login" | "register">("login");
   const [username, setUsername] = useState("");
   const [displayName, setDisplayName] = useState("");
@@ -260,34 +324,38 @@ function AuthPanel({ onAuthenticated }: { onAuthenticated: (session: AuthSession
   }
 
   return (
-    <main className="grid min-h-screen place-items-center bg-stone-100 px-4 py-8 text-zinc-950">
+    <main className="grid min-h-[100dvh] place-items-center bg-paper px-4 py-8 text-ink">
       <form
-        className="w-full max-w-sm rounded-md border border-zinc-200 bg-white p-5 shadow-hairline"
+        className="w-full max-w-sm rounded-md border border-linen bg-surface p-5 shadow-lift"
         onSubmit={handleSubmit}
       >
         <div>
-          <h1 className="text-xl font-semibold tracking-normal">llm-craft</h1>
-          <p className="mt-1 text-sm text-zinc-500">Mock user session</p>
+          <h1>
+            <Wordmark className="text-2xl" />
+          </h1>
+          <p className="mt-1 text-sm text-soot">
+            Sign in with an account to keep your name and progress.
+          </p>
         </div>
 
-        <div className="mt-5 grid grid-cols-2 rounded-md border border-zinc-200 bg-zinc-50 p-1">
+        <div className="mt-5 grid grid-cols-2 rounded-md border border-linen bg-paper p-1">
           <button
             className={`h-9 rounded text-sm font-medium ${
-              mode === "login" ? "bg-white shadow-sm" : "text-zinc-500"
+              mode === "login" ? "bg-surface shadow-sm" : "text-soot"
             }`}
             onClick={() => setMode("login")}
             type="button"
           >
-            Login
+            Log in
           </button>
           <button
             className={`h-9 rounded text-sm font-medium ${
-              mode === "register" ? "bg-white shadow-sm" : "text-zinc-500"
+              mode === "register" ? "bg-surface shadow-sm" : "text-soot"
             }`}
             onClick={() => setMode("register")}
             type="button"
           >
-            Register
+            Create account
           </button>
         </div>
 
@@ -319,13 +387,23 @@ function AuthPanel({ onAuthenticated }: { onAuthenticated: (session: AuthSession
         ) : null}
 
         <button
-          className="mt-5 flex h-10 w-full items-center justify-center gap-2 rounded-md bg-zinc-950 px-3 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
+          className="mt-5 flex h-10 w-full items-center justify-center gap-2 rounded-md bg-cobalt px-3 text-sm font-semibold text-white transition hover:bg-cobalt-deep disabled:cursor-not-allowed disabled:opacity-60"
           disabled={isSubmitting}
           type="submit"
         >
           {mode === "register" ? <UserPlus size={16} /> : <LogIn size={16} />}
-          {mode === "register" ? "Create user" : "Log in"}
+          {mode === "register" ? "Create account" : "Log in"}
         </button>
+
+        {onDismiss ? (
+          <button
+            className="mt-3 h-10 w-full rounded-md border border-linen bg-surface px-3 text-sm font-medium text-soot transition hover:bg-paper hover:text-ink"
+            onClick={onDismiss}
+            type="button"
+          >
+            Keep playing as guest
+          </button>
+        ) : null}
       </form>
     </main>
   );
@@ -341,7 +419,8 @@ function ModeMenu({
   onCombinerModelChange,
   onLogout,
   onOpenProfile,
-  onSelectMode
+  onSelectMode,
+  onSignIn
 }: {
   goalDepth: number;
   goalGenerationMessage: string | null;
@@ -353,20 +432,38 @@ function ModeMenu({
   onLogout: () => void;
   onOpenProfile: () => void;
   onSelectMode: (mode: GameMode) => void | Promise<void>;
+  onSignIn?: () => void;
 }) {
   return (
-    <main className="min-h-screen bg-[#f6f2e8] px-4 py-6 text-zinc-950">
-      <div className="mx-auto flex min-h-[calc(100vh-3rem)] max-w-6xl flex-col gap-5">
-        <header className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-200 pb-4">
+    <main className="min-h-[100dvh] bg-paper px-4 py-6 text-ink">
+      <div className="mx-auto flex min-h-[calc(100dvh-3rem)] max-w-6xl flex-col gap-5">
+        <header className="flex flex-wrap items-center justify-between gap-3 border-b border-linen pb-4">
           <div>
-            <h1 className="text-xl font-semibold tracking-normal">llm-craft</h1>
-            <p className="mt-1 text-sm text-zinc-500">{user.displayName}</p>
+            <h1>
+              <Wordmark className="text-3xl" />
+            </h1>
+            <p className="mt-1 text-sm text-soot">
+              Combine two ideas. A fine-tuned model invents the result.
+            </p>
           </div>
           <div className="flex items-center gap-2">
+            <span className="hidden h-10 items-center rounded-md border border-linen bg-surface px-3 text-sm text-soot sm:flex">
+              {user.displayName}
+            </span>
+            {onSignIn ? (
+              <button
+                className="flex h-10 items-center gap-2 rounded-md border border-linen bg-surface px-3 text-sm font-medium text-soot transition hover:bg-paper hover:text-ink"
+                onClick={onSignIn}
+                type="button"
+              >
+                <LogIn size={16} />
+                Sign in
+              </button>
+            ) : null}
             <IconButton label="Profile" onClick={onOpenProfile}>
               <BadgeCheck size={17} />
             </IconButton>
-            <IconButton label="Log out" onClick={onLogout}>
+            <IconButton label={onSignIn ? "New guest session" : "Log out"} onClick={onLogout}>
               <LogOut size={17} />
             </IconButton>
           </div>
@@ -374,40 +471,42 @@ function ModeMenu({
 
         <section className="grid flex-1 gap-4 lg:grid-cols-3">
           <ModeCard
-            accentClassName="border-amber-300 bg-amber-50 hover:border-amber-400 hover:bg-amber-100"
+            hue={38}
             icon={<Sparkles size={22} />}
-            modeLabel="Free mix"
+            modeLabel="Mix anything with anything, no rules"
             previewElements={["💧", "🔥", "🌍", "💨"]}
             resultElement="✨"
             label="Sandbox"
             onClick={() => onSelectMode("sandbox")}
           />
           <ModeCard
-            accentClassName="border-sky-300 bg-sky-50 hover:border-sky-400 hover:bg-sky-100"
+            hue={222}
             disabled={isGeneratingGoal}
             icon={<Target size={22} />}
-            modeLabel={`Random goal at depth ${goalDepth}`}
+            modeLabel={`Reach a target element in as few combinations as you can — depth ${goalDepth}`}
             previewElements={["🧭", "🛤️", "📍", "🎯"]}
             resultElement="🏁"
-            label={isGeneratingGoal ? "Generating" : "Goal"}
+            label={isGeneratingGoal ? "Generating…" : "Goal"}
             onClick={() => onSelectMode("goal")}
           />
           <ModeCard
-            accentClassName="border-emerald-300 bg-emerald-50 hover:border-emerald-400 hover:bg-emerald-100"
+            hue={152}
             compactPreview
             icon={<Bot size={22} />}
-            modeLabel={`Agent run at depth ${goalDepth}`}
+            modeLabel={`Watch the model play toward a goal on its own — depth ${goalDepth}`}
             previewElements={["🤖"]}
             resultElement="🤖"
-            label="Agent Test"
+            label="Agent Run"
             onClick={() => onSelectMode("agent-test")}
           />
         </section>
-        <div className="flex flex-wrap items-center gap-3 rounded-md border border-sky-200 bg-white/80 px-4 py-3 shadow-hairline">
-          <label className="flex items-center gap-3 text-sm font-semibold text-zinc-700">
-            <span>Goal depth</span>
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-3 rounded-md border border-linen bg-surface px-4 py-3 shadow-hairline">
+          <label className="flex items-center gap-3">
+            <span className="font-mono text-xs font-medium uppercase tracking-wider text-soot">
+              Goal depth
+            </span>
             <select
-              className="h-9 rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-zinc-500"
+              className="h-9 rounded-md border border-linen bg-surface px-3 font-mono text-sm outline-none transition focus:border-cobalt"
               disabled={isGeneratingGoal}
               onChange={(event) => onGoalDepthChange(Number(event.target.value))}
               value={goalDepth}
@@ -419,10 +518,12 @@ function ModeMenu({
               ))}
             </select>
           </label>
-          <label className="flex min-w-[240px] items-center gap-3 text-sm font-semibold text-zinc-700">
-            <span>Combiner model</span>
+          <label className="flex min-w-[240px] items-center gap-3">
+            <span className="font-mono text-xs font-medium uppercase tracking-wider text-soot">
+              Model
+            </span>
             <select
-              className="h-9 min-w-0 flex-1 rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-zinc-500"
+              className="h-9 min-w-0 flex-1 rounded-md border border-linen bg-surface px-3 font-mono text-sm outline-none transition focus:border-cobalt"
               onChange={(event) => onCombinerModelChange(event.target.value)}
               value={selectedCombinerModel}
             >
@@ -466,7 +567,7 @@ function normalizeStorageSegment(value: string): string {
 }
 
 function ModeCard({
-  accentClassName,
+  hue,
   disabled = false,
   compactPreview = false,
   icon,
@@ -476,7 +577,7 @@ function ModeCard({
   previewElements,
   resultElement
 }: {
-  accentClassName: string;
+  hue: number;
   disabled?: boolean;
   compactPreview?: boolean;
   icon: ReactNode;
@@ -488,22 +589,23 @@ function ModeCard({
 }) {
   return (
     <button
-      className={`group relative min-h-[360px] overflow-hidden rounded-md border-2 p-5 text-left shadow-hairline transition duration-200 hover:-translate-y-1 hover:shadow-xl active:translate-y-0 ${accentClassName}`}
+      className="element-card group relative min-h-[280px] overflow-hidden rounded-md border-2 p-5 text-left shadow-hairline transition duration-200 hover:-translate-y-1 hover:shadow-lift active:translate-y-0 sm:min-h-[360px]"
       disabled={disabled}
       onClick={onClick}
+      style={{ "--el-hue": hue } as CSSProperties}
       type="button"
     >
       <div className="relative z-10 flex h-full flex-col justify-between gap-6">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h2 className="text-4xl font-black tracking-normal sm:text-5xl">
+            <h2 className="font-display text-4xl font-black tracking-tight sm:text-5xl">
               {label}
             </h2>
-            <p className="mt-3 max-w-xs text-base font-semibold text-zinc-600">
+            <p className="mt-3 max-w-xs text-base font-medium text-soot">
               {modeLabel}
             </p>
           </div>
-          <span className="grid size-12 place-items-center rounded-md border border-zinc-300 bg-white/80 text-zinc-700 transition group-hover:rotate-6 group-hover:scale-110">
+          <span className="grid size-12 place-items-center rounded-md border border-linen bg-surface/85 text-ink transition group-hover:rotate-6 group-hover:scale-110">
             {icon}
           </span>
         </div>
@@ -511,7 +613,7 @@ function ModeCard({
         <div className="grid gap-5">
           {compactPreview ? (
             <div className="grid place-items-center py-6">
-              <span className="grid size-36 place-items-center rounded-md border border-emerald-300 bg-white text-7xl shadow-md transition duration-200 group-hover:-translate-y-2 group-hover:rotate-3">
+              <span className="grid size-36 place-items-center rounded-md border border-linen bg-surface text-7xl shadow-md transition duration-200 group-hover:-translate-y-2 group-hover:rotate-3">
                 {resultElement}
               </span>
             </div>
@@ -520,25 +622,25 @@ function ModeCard({
               <div className="grid grid-cols-2 gap-2">
                 {previewElements.map((element, index) => (
                   <span
-                    className="grid aspect-square place-items-center rounded-md border border-zinc-300 bg-white/85 text-3xl shadow-sm transition duration-200 group-hover:-translate-y-1 group-hover:rotate-2"
+                    className="grid aspect-square place-items-center rounded-md border border-linen bg-surface/90 text-3xl shadow-sm transition duration-200 group-hover:-translate-y-1 group-hover:rotate-2"
                     key={`${element}-${index}`}
                   >
                     {element}
                   </span>
                 ))}
               </div>
-              <span className="grid size-12 place-items-center rounded-md border border-zinc-300 bg-white/80 text-zinc-600 transition group-hover:scale-110">
+              <span className="grid size-12 place-items-center rounded-md border border-linen bg-surface/85 text-soot transition group-hover:scale-110">
                 <Play size={18} />
               </span>
-              <span className="grid aspect-square place-items-center rounded-md border border-zinc-300 bg-white text-5xl shadow-md transition duration-200 group-hover:-translate-y-2 group-hover:rotate-3">
+              <span className="grid aspect-square place-items-center rounded-md border border-linen bg-surface text-5xl shadow-md transition duration-200 group-hover:-translate-y-2 group-hover:rotate-3">
                 {resultElement}
               </span>
             </div>
           )}
 
-          <div className="flex items-center justify-between gap-3 rounded-md border border-zinc-300 bg-white/80 px-4 py-3">
-            <span className="text-sm font-semibold text-zinc-700">Play</span>
-            <span className="grid size-8 place-items-center rounded-md bg-zinc-950 text-white transition group-hover:translate-x-1">
+          <div className="flex items-center justify-between gap-3 rounded-md border border-linen bg-surface/85 px-4 py-3">
+            <span className="text-sm font-semibold text-ink">Play</span>
+            <span className="grid size-8 place-items-center rounded-md bg-cobalt text-white transition group-hover:translate-x-1">
               <Play size={15} />
             </span>
           </div>
@@ -549,7 +651,7 @@ function ModeCard({
         <div className="pointer-events-none absolute -bottom-10 -right-8 grid grid-cols-3 gap-2 opacity-30 transition duration-200 group-hover:-translate-y-2 group-hover:opacity-45">
           {previewElements.concat(resultElement).map((element, index) => (
             <span
-              className="grid size-12 place-items-center rounded-md border border-zinc-300 bg-white text-xl"
+              className="grid size-12 place-items-center rounded-md border border-linen bg-surface text-xl"
               key={`${element}-ghost-${index}`}
             >
               {element}
@@ -629,12 +731,12 @@ function ProfileView({
   }
 
   return (
-    <main className="min-h-screen bg-stone-100 px-4 py-6 text-zinc-950">
+    <main className="min-h-[100dvh] bg-paper px-4 py-6 text-ink">
       <div className="mx-auto grid max-w-5xl gap-5">
-        <header className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-200 pb-4">
+        <header className="flex flex-wrap items-center justify-between gap-3 border-b border-linen pb-4">
           <div>
-            <h1 className="text-xl font-semibold tracking-normal">Profile</h1>
-            <p className="mt-1 text-sm text-zinc-500">@{user.username}</p>
+            <h1 className="font-display text-xl font-bold tracking-tight">Profile</h1>
+            <p className="mt-1 font-mono text-sm text-soot">@{user.username}</p>
           </div>
           <div className="flex items-center gap-2">
             <IconButton label="Back" onClick={onBack}>
@@ -647,7 +749,7 @@ function ProfileView({
         </header>
 
         <section className="grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
-          <div className="rounded-md border border-zinc-200 bg-white p-5 shadow-hairline">
+          <div className="rounded-md border border-linen bg-surface p-5 shadow-hairline">
             <TextField
               label="Display name"
               onChange={setDisplayName}
@@ -662,14 +764,15 @@ function ProfileView({
               <h2 className="text-sm font-semibold">Showcase</h2>
               <div className="mt-3 grid gap-2">
                 {selectedAchievements.length === 0 ? (
-                  <p className="rounded-md border border-dashed border-zinc-200 p-3 text-sm text-zinc-500">
-                    No featured achievements yet.
+                  <p className="rounded-md border border-dashed border-linen p-3 text-sm text-soot">
+                    Feature up to six discoveries here.
                   </p>
                 ) : (
                   selectedAchievements.map((achievement) => (
                     <div
-                      className="flex items-center gap-2 rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm capitalize"
+                      className="element-card flex items-center gap-2 rounded-md border px-3 py-2 text-sm capitalize"
                       key={achievement.elementId}
+                      style={{ "--el-hue": getHueForConcept(achievement.name) } as CSSProperties}
                     >
                       <span>{achievement.emoji ?? "·"}</span>
                       <span className="truncate">{achievement.name}</span>
@@ -683,14 +786,15 @@ function ProfileView({
               <h2 className="text-sm font-semibold">Recent</h2>
               <div className="mt-3 grid gap-2">
                 {snapshot.history.length === 0 ? (
-                  <p className="rounded-md border border-dashed border-zinc-200 p-3 text-sm text-zinc-500">
+                  <p className="rounded-md border border-dashed border-linen p-3 text-sm text-soot">
                     No recent discoveries in this mode.
                   </p>
                 ) : (
                   snapshot.history.slice(0, 5).map((item) => (
                     <div
-                      className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm"
+                      className="element-card rounded-md border px-3 py-2 text-sm"
                       key={item.id}
+                      style={{ "--el-hue": getHueForConcept(item.output.name) } as CSSProperties}
                     >
                       <span className="capitalize">{item.output.name}</span>
                     </div>
@@ -700,7 +804,7 @@ function ProfileView({
             </div>
 
             <button
-              className="mt-5 flex h-10 w-full items-center justify-center gap-2 rounded-md bg-zinc-950 px-3 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
+              className="mt-5 flex h-10 w-full items-center justify-center gap-2 rounded-md bg-cobalt px-3 text-sm font-semibold text-white transition hover:bg-cobalt-deep disabled:cursor-not-allowed disabled:opacity-60"
               disabled={isSaving}
               onClick={saveProfile}
               type="button"
@@ -708,20 +812,20 @@ function ProfileView({
               <Save size={16} />
               Save profile
             </button>
-            {message ? <p className="mt-3 text-sm text-zinc-500">{message}</p> : null}
+            {message ? <p className="mt-3 text-sm text-soot">{message}</p> : null}
           </div>
 
-          <div className="rounded-md border border-zinc-200 bg-white p-5 shadow-hairline">
+          <div className="rounded-md border border-linen bg-surface p-5 shadow-hairline">
             <div className="flex items-center justify-between gap-3">
               <h2 className="text-sm font-semibold">Achievements</h2>
-              <span className="text-sm text-zinc-500">
+              <span className="font-mono text-sm text-soot">
                 {selectedIds.length}/{FEATURED_ACHIEVEMENT_LIMIT}
               </span>
             </div>
 
             <div className="mt-4 grid max-h-[60vh] grid-cols-2 gap-2 overflow-y-auto pr-1 md:grid-cols-3">
               {snapshot.inventory.length === 0 ? (
-                <p className="col-span-full rounded-md border border-dashed border-zinc-200 p-4 text-sm text-zinc-500">
+                <p className="col-span-full rounded-md border border-dashed border-linen p-4 text-sm text-soot">
                   Enter a mode to load this user's inventory.
                 </p>
               ) : (
@@ -730,13 +834,12 @@ function ProfileView({
 
                   return (
                     <button
-                      className={`min-h-20 rounded-md border px-3 py-2 text-center transition ${
-                        isSelected
-                          ? "border-zinc-950 bg-zinc-100"
-                          : "border-zinc-200 bg-zinc-50 hover:bg-white"
+                      className={`element-card min-h-20 rounded-md border px-3 py-2 text-center transition hover:shadow-hairline ${
+                        isSelected ? "ring-2 ring-cobalt" : ""
                       }`}
                       key={element.id}
                       onClick={() => toggleAchievement(element.id)}
+                      style={{ "--el-hue": getHueForConcept(element.name) } as CSSProperties}
                       type="button"
                     >
                       <span className="text-2xl">{element.emoji ?? "·"}</span>
@@ -767,10 +870,10 @@ function TextField({
   value: string;
 }) {
   return (
-    <label className="grid gap-1 text-sm font-medium text-zinc-700">
+    <label className="grid gap-1 text-sm font-medium text-ink">
       <span>{label}</span>
       <input
-        className="h-10 rounded-md border border-zinc-200 bg-zinc-50 px-3 text-sm outline-none transition focus:border-zinc-400 focus:bg-white"
+        className="h-10 rounded-md border border-linen bg-paper px-3 text-sm outline-none transition focus:border-cobalt focus:bg-surface"
         onChange={(event) => onChange(event.target.value)}
         type={type}
         value={value}
@@ -791,7 +894,7 @@ function IconButton({
   return (
     <button
       aria-label={label}
-      className="grid size-10 place-items-center rounded-md border border-zinc-200 bg-white text-zinc-600 transition hover:bg-zinc-50 hover:text-zinc-950"
+      className="grid size-10 place-items-center rounded-md border border-linen bg-surface text-soot transition hover:bg-paper hover:text-ink"
       onClick={onClick}
       title={label}
       type="button"
@@ -803,9 +906,9 @@ function IconButton({
 
 function MetricCard({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-md border border-zinc-200 bg-zinc-50 p-3">
-      <p className="text-2xl font-semibold">{value}</p>
-      <p className="mt-1 text-xs text-zinc-500">{label}</p>
+    <div className="rounded-md border border-linen bg-paper p-3">
+      <p className="font-mono text-2xl font-semibold">{value}</p>
+      <p className="mt-1 font-mono text-xs uppercase tracking-wider text-soot">{label}</p>
     </div>
   );
 }

@@ -5,7 +5,15 @@ import {
   generateRandomGoal,
   isValidGoalDepth
 } from "@/lib/server/randomGoals";
-import { requestVertexJson } from "@/lib/server/vertexCombiner";
+import {
+  requestVertexJson,
+  VertexConfigurationError,
+  VertexGenerationError
+} from "@/lib/server/vertexCombiner";
+import {
+  QwenConfigurationError,
+  QwenGenerationError
+} from "@/lib/server/qwenCombiner";
 import type {
   AgentTestReport,
   AgentTestRequest,
@@ -318,6 +326,20 @@ function extractJson(value: string): string {
 }
 
 function getErrorMessage(error: unknown): string {
+  // Upstream model errors can embed provider/quota/response-body detail
+  // (vertexCombiner builds messages like `...: ${detail}`). This message is
+  // surfaced verbatim in the report returned to any (guest) user, so map those
+  // to a generic message and keep the detail in the server log only.
+  if (
+    error instanceof VertexGenerationError ||
+    error instanceof VertexConfigurationError ||
+    error instanceof QwenGenerationError ||
+    error instanceof QwenConfigurationError
+  ) {
+    console.error("[agent-test] model backend error", error);
+    return "The model backend is unavailable";
+  }
+
   return error instanceof Error ? error.message : "Agent test failed";
 }
 
@@ -325,7 +347,14 @@ function getAgentRequestTimeoutMs(model: string): number | undefined {
   return model.includes("pro") ? PRO_AGENT_REQUEST_TIMEOUT_MS : undefined;
 }
 
+// Daily seed: every model attempting the same depth on the same day faces the
+// same goal, so arena rankings compare like with like. randomUUID stays
+// available for explicit per-run seeds passed via the request.
 function createAgentTestSeed(depth: number): string {
+  return `agent-arena:${new Date().toISOString().slice(0, 10)}:${depth}`;
+}
+
+export function createRandomAgentSeed(depth: number): string {
   return `agent-test:${depth}:${randomUUID()}`;
 }
 

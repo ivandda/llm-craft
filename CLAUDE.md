@@ -70,7 +70,7 @@ Trains causal LMs on JSONL recipes with **multiple weighted candidate outputs pe
 
 ### `src/agent/` — playable agent runner (uses the `agents` dep group: langchain + google-genai + deepagents).
 
-### `apps/web/` — Next.js frontend (mock-only, typed contracts for connecting models later; seeded creds `admin/admin`).
+### `apps/web/` — Next.js game frontend. Real model calls (Vertex Gemini or the fine-tuned Qwen via `QWEN_COMBINER_BASE_URL`), Postgres recipe cache + DPO preference capture (`db/migrations/`, applied with `python -m src.data.db_migrate`), anonymous guest sessions (seeded admin creds `admin/admin`), per-user/IP rate limiting on model-backed endpoints. Details in `docs/codigo/frontend_next_app.md`.
 
 ## Vertex AI training
 

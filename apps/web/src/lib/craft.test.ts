@@ -16,7 +16,7 @@ import {
   FEATURED_ACHIEVEMENT_LIMIT,
   selectFeaturedAchievements
 } from "@/lib/profile";
-import { loginUser } from "@/lib/server/mockAuth";
+import { createGuestSession, loginUser, registerUser } from "@/lib/server/mockAuth";
 import {
   listLeaderboard,
   saveLeaderboardEntry
@@ -28,8 +28,9 @@ import {
   isValidGoalDepth
 } from "@/lib/server/randomGoals";
 import type { GoalPathStep } from "@/lib/server/randomGoals";
+import { checkRateLimit } from "@/lib/server/rateLimit";
 import { saveDpoPreference } from "@/lib/server/dpoPreferences";
-import { combineElementsWithDataset } from "@/lib/server/dbRecipes";
+import { buildDpoCandidates, combineElementsWithDataset } from "@/lib/server/dbRecipes";
 import { runAgentGoalTest } from "@/lib/server/agentTestRunner";
 import {
   getCombinerModelLabel,
@@ -88,6 +89,7 @@ const dbMock = vi.hoisted(() => {
 
   const users = new Map<string, UserRow>();
   const sessions = new Map<string, string>();
+  const rateLimitCounters = new Map<string, number>();
   const leaderboard = new Map<string, LeaderboardRow>();
   const recipeRows: RecipeRow[] = [];
   const storedRecipeRows: StoredRecipeRow[] = [];
@@ -130,6 +132,28 @@ const dbMock = vi.hoisted(() => {
     if (normalizedSql.includes("insert into sessions")) {
       const [sessionId, userId] = params as string[];
       sessions.set(sessionId, userId);
+      return { rows: [] };
+    }
+
+    if (
+      normalizedSql.includes("from sessions s") &&
+      normalizedSql.includes("join users u")
+    ) {
+      const sessionId = params[0] as string;
+      const userId = sessions.get(sessionId);
+      const user = userId ? users.get(userId) : undefined;
+      return { rows: user ? [user] : [] };
+    }
+
+    if (normalizedSql.includes("insert into rate_limit_counters")) {
+      const [scope, key, windowStart] = params as string[];
+      const counterKey = `${scope}|${key}|${windowStart}`;
+      const count = (rateLimitCounters.get(counterKey) ?? 0) + 1;
+      rateLimitCounters.set(counterKey, count);
+      return { rows: [{ count }] };
+    }
+
+    if (normalizedSql.includes("delete from rate_limit_counters")) {
       return { rows: [] };
     }
 
@@ -261,6 +285,7 @@ const dbMock = vi.hoisted(() => {
     reset() {
       users.clear();
       sessions.clear();
+      rateLimitCounters.clear();
       leaderboard.clear();
       recipeRows.splice(0);
       storedRecipeRows.splice(0);
@@ -328,6 +353,8 @@ function createAgentGoal(targetName: string, minDepth = 2): GoalPreset {
 describe("craft utilities", () => {
   beforeEach(() => {
     dbMock.reset();
+    globalThis.llmCraftAdminSeeded = undefined;
+    globalThis.llmCraftGoalRecipeCache = undefined;
     vi.unstubAllGlobals();
     delete process.env.VERTEX_API_KEY;
     delete process.env.VERTEX_MODEL;
@@ -421,10 +448,33 @@ describe("craft utilities", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("rejects unknown combine models at the API boundary", async () => {
+  it("rejects unauthenticated combine requests", async () => {
     const response = await combinePost(
       new Request("http://localhost/api/combine", {
         method: "POST",
+        body: JSON.stringify({
+          inputA: createElementToken("water"),
+          inputB: createElementToken("fire"),
+          inventory: BASE_ELEMENTS
+        })
+      })
+    );
+
+    expect(response.status).toBe(401);
+  });
+
+  it("rejects unknown combine models at the API boundary", async () => {
+    const registration = await registerUser({
+      username: "combine-tester",
+      password: "secret-pass",
+      displayName: "Combine Tester"
+    });
+    const sessionId = "sessionId" in registration ? registration.sessionId : "";
+
+    const response = await combinePost(
+      new Request("http://localhost/api/combine", {
+        method: "POST",
+        headers: { cookie: `llm-craft.session=${sessionId}` },
         body: JSON.stringify({
           inputA: createElementToken("water"),
           inputB: createElementToken("fire"),
@@ -435,6 +485,55 @@ describe("craft utilities", () => {
     );
 
     expect(response.status).toBe(400);
+  });
+
+  it("creates guest sessions that can authenticate combine requests", async () => {
+    const guest = await createGuestSession();
+
+    expect(guest.user.username.startsWith("guest-")).toBe(true);
+
+    dbMock.setStoredRecipeRows([
+      {
+        dataset_name: "final-10k",
+        output: "steam",
+        rationale: null,
+        rank: 1
+      }
+    ]);
+
+    const response = await combinePost(
+      new Request("http://localhost/api/combine", {
+        method: "POST",
+        headers: { cookie: `llm-craft.session=${guest.sessionId}` },
+        body: JSON.stringify({
+          inputA: createElementToken("water"),
+          inputB: createElementToken("fire"),
+          inventory: BASE_ELEMENTS
+        })
+      })
+    );
+
+    expect(response.status).toBe(200);
+  });
+
+  it("reserves the guest username prefix for guest sessions", async () => {
+    const result = await registerUser({
+      username: "guest-impostor",
+      password: "secret-pass",
+      displayName: "Impostor"
+    });
+
+    expect("error" in result).toBe(true);
+  });
+
+  it("rate limits per scope and key within a window", async () => {
+    const rule = { limit: 2, windowSeconds: 60 };
+
+    expect((await checkRateLimit("test-scope", "key", rule)).allowed).toBe(true);
+    expect((await checkRateLimit("test-scope", "key", rule)).allowed).toBe(true);
+    expect((await checkRateLimit("test-scope", "key", rule)).allowed).toBe(false);
+    expect((await checkRateLimit("test-scope", "other", rule)).allowed).toBe(true);
+    expect((await checkRateLimit("other-scope", "key", rule)).allowed).toBe(true);
   });
 
   it("recognizes Gemini and Qwen combiner models separately from agent models", () => {
@@ -626,7 +725,7 @@ describe("craft utilities", () => {
 
     expect(response.source).toBe("model_generated");
     expect(response.result.name).toBe("steam");
-    expect(response.result.emoji).toBeUndefined();
+    expect(response.result.emoji).toBe("♨️");
     expect(response.model).toBe("qwen3-4b-dpo-softce");
     expect(response.rationale).toBeUndefined();
     expect(capturedUrl).toBe("http://qwen.test/v1/chat/completions");
@@ -675,6 +774,8 @@ describe("craft utilities", () => {
       }))
     );
 
+    // Invalid Qwen output falls back to Vertex; with Vertex unconfigured the
+    // whole combination fails and nothing is stored under either dataset.
     await expect(
       combineElementsWithDataset({
         inputA: createElementToken("fire"),
@@ -682,7 +783,7 @@ describe("craft utilities", () => {
         inventory: BASE_ELEMENTS,
         model: "qwen3-4b-dpo-softce"
       })
-    ).rejects.toThrow("Qwen returned one of the input concepts");
+    ).rejects.toThrow("VERTEX_API_KEY");
     expect(dbMock.generatedCandidates).toHaveLength(0);
   });
 
@@ -1076,6 +1177,43 @@ describe("craft utilities", () => {
 
     expect(twoCandidates).toHaveLength(2);
     expect(threeCandidates).toHaveLength(3);
+  });
+
+  it("builds blind DPO candidates from stored recipes when live models are unavailable", async () => {
+    dbMock.setStoredRecipeRows([
+      { dataset_name: "final-10k", output: "steam", rationale: null, rank: 1 },
+      { dataset_name: "final-10k", output: "geyser", rationale: null, rank: 2 },
+      { dataset_name: "final-10k", output: "mist", rationale: null, rank: 3 },
+      { dataset_name: "final-10k", output: "cloud", rationale: null, rank: 4 }
+    ]);
+
+    const result = await buildDpoCandidates({
+      inputA: createElementToken("water"),
+      inputB: createElementToken("fire"),
+      inventory: BASE_ELEMENTS
+    });
+
+    expect(result.source).toBe("known_recipe");
+    expect(result.candidates).toHaveLength(3);
+    expect(result.candidates[0].name).toBe("steam");
+    expect(result.candidates[0].generatedBy).toBe("dataset");
+    expect(dbMock.generatedCandidates).toHaveLength(0);
+  });
+
+  it("always keeps the canonical output among DPO candidates", () => {
+    const outputs = [
+      createElementToken("steam"),
+      createElementToken("mist"),
+      createElementToken("hot spring"),
+      createElementToken("cloud"),
+      createElementToken("geyser")
+    ];
+
+    for (const random of [() => 0, () => 0.49, () => 0.99]) {
+      const candidates = selectDpoCandidates(outputs, random);
+
+      expect(candidates.some((candidate) => candidate.id === "steam")).toBe(true);
+    }
   });
 
   it("stores selected and rejected DPO outputs", async () => {

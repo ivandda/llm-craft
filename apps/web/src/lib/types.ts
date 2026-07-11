@@ -75,6 +75,7 @@ export type GoalPreset = {
 
 export type RandomGoalRequest = {
   depth: number;
+  seed?: string;
 };
 
 export type AgentTestRequest = {
@@ -112,6 +113,30 @@ export type AgentTestReport = {
   steps: AgentTestStep[];
   finalInventory: ElementToken[];
   errorMessage?: string;
+};
+
+export type AgentRankingEntry = {
+  model: string;
+  runs: number;
+  wins: number;
+  winRate: number;
+  avgCombinations: number | null;
+};
+
+export type DpoCandidate = ElementToken & {
+  generatedBy?: string;
+};
+
+export type DpoCandidatesRequest = {
+  inputA: ElementToken;
+  inputB: ElementToken;
+  inventory: ElementToken[];
+  model?: string;
+};
+
+export type DpoCandidatesResponse = {
+  candidates: DpoCandidate[];
+  source: CombineSource;
 };
 
 export type DpoPreferenceRequest = {

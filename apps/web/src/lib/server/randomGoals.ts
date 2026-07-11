@@ -156,23 +156,47 @@ export function buildRandomGoalCandidate(
   return null;
 }
 
+const GOAL_RECIPE_CACHE_TTL_MS = 5 * 60 * 1000;
+
+declare global {
+  var llmCraftGoalRecipeCache:
+    | { recipes: GoalRecipe[]; loadedAt: number }
+    | undefined;
+}
+
 async function listGoalRecipes(): Promise<GoalRecipe[]> {
+  const cached = globalThis.llmCraftGoalRecipeCache;
+
+  if (cached && Date.now() - cached.loadedAt < GOAL_RECIPE_CACHE_TTL_MS) {
+    return cached.recipes;
+  }
+
+  // Model-generated recipes join the goal pool; when the same pair exists in
+  // final-10k and a web-generated dataset, final-10k wins so goal paths match
+  // what the combine cache serves at play time.
   const result = await query<GoalRecipeRow>(
     `
-    SELECT DISTINCT rp.input_a, rp.input_b, rc.output
+    SELECT DISTINCT ON (rp.input_a, rp.input_b) rp.input_a, rp.input_b, rc.output
     FROM recipe_pairs rp
     JOIN recipe_candidates rc ON rc.pair_id = rp.pair_id
-    WHERE rp.dataset_name = $1
+    WHERE (rp.dataset_name = $1 OR rp.dataset_name LIKE $2)
       AND rc.rank = 1
+    ORDER BY rp.input_a, rp.input_b, (rp.dataset_name = $1) DESC
     `,
-    [FINAL_DATASET_NAME]
+    [FINAL_DATASET_NAME, "web-generated%"]
   );
 
-  return result.rows.map((row) => ({
+  const recipes = result.rows.map((row) => ({
     inputA: normalizeConcept(row.input_a),
     inputB: normalizeConcept(row.input_b),
     output: normalizeConcept(row.output)
   }));
+
+  if (recipes.length > 0) {
+    globalThis.llmCraftGoalRecipeCache = { recipes, loadedAt: Date.now() };
+  }
+
+  return recipes;
 }
 
 function buildCandidatesForPreset(

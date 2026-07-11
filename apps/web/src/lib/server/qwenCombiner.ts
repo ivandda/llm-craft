@@ -1,4 +1,5 @@
 import { createElementToken, normalizeConcept } from "@/lib/craft";
+import { getEmojiForConcept } from "@/lib/emoji";
 import { QWEN_COMBINER_MODEL } from "@/lib/agentModels";
 import type { CombineRequest, CombineResponse } from "@/lib/types";
 
@@ -31,7 +32,7 @@ export async function generateCombinationWithQwen(
 
   validateQwenConcept(name, request);
 
-  const result = createElementToken(name);
+  const result = createElementToken(name, getEmojiForConcept(name));
 
   return {
     result,

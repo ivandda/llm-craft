@@ -27,15 +27,24 @@ export async function transaction<T>(
 ): Promise<T> {
   const client = await getPool().connect();
 
+  let releaseError: unknown;
+
   try {
     await client.query("BEGIN");
     const result = await callback(client);
     await client.query("COMMIT");
     return result;
   } catch (error) {
-    await client.query("ROLLBACK");
+    // Preserve the original error even if ROLLBACK itself fails (e.g. a broken
+    // connection), and flag the connection as poisoned so the pool discards it.
+    try {
+      await client.query("ROLLBACK");
+    } catch (rollbackError) {
+      releaseError = rollbackError;
+    }
+
     throw error;
   } finally {
-    client.release();
+    client.release(releaseError ? (releaseError as Error) : undefined);
   }
 }

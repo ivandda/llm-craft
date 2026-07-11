@@ -611,7 +611,7 @@ La guía completa (prerrequisitos, permisos, cuota de GPU, overrides y descarga 
 
 ## Frontend
 
-La interfaz jugable vive en `apps/web` como una app Next.js. El combinador consulta recetas en Postgres y usa Vertex AI con `VERTEX_API_KEY` o `GOOGLE_APPLICATION_CREDENTIALS` para generar y guardar combinaciones nuevas cuando el par no existe en la base. `Sandbox` y `Goal` permiten elegir el modelo Gemini del combinador (`Gemini 2.5 Flash`, `Gemini 2.5 Pro` o `Gemini 2.5 Flash Lite`); esa seleccion solo aplica a combinaciones generadas por modelo, porque las recetas conocidas de `final-10k` siempre tienen prioridad para mantener resultados deterministas. Incluye registro/login mock con credenciales seeded `admin/admin`, menu de modos (`Sandbox`, `Goal` y `Agent Test`), metas alcanzables por profundidad con inventario inicial variable, controles internos para reiniciar o generar otra meta en `Goal`, un modo de prueba donde un agente usa el combinador hasta 20 mezclas, `DPO test mode`, perfil con logros destacados y leaderboard para objetivos completados.
+La interfaz jugable vive en `apps/web` como una app Next.js. El combinador consulta recetas en Postgres y usa Vertex AI con `VERTEX_API_KEY` o `GOOGLE_APPLICATION_CREDENTIALS` para generar y guardar combinaciones nuevas cuando el par no existe en la base. `Sandbox` y `Goal` permiten elegir el modelo Gemini del combinador (`Gemini 2.5 Flash`, `Gemini 2.5 Pro` o `Gemini 2.5 Flash Lite`); esa seleccion solo aplica a combinaciones generadas por modelo, porque las recetas conocidas de `final-10k` siempre tienen prioridad para mantener resultados deterministas. El acceso es anonimo: al entrar se crea automaticamente una sesion de invitado (`POST /api/auth/guest`), con opcion de registro/login clasico (credenciales seeded `admin/admin` para administracion). Los endpoints que llaman al modelo (`/api/combine`, `/api/goals/random`, `/api/agent-test/run`) exigen sesion y tienen rate limiting por usuario e IP respaldado en Postgres (tabla `rate_limit_counters`, migracion `004`). Incluye menu de modos (`Sandbox`, `Goal` y `Agent Test`), metas alcanzables por profundidad con inventario inicial variable, controles internos para reiniciar o generar otra meta en `Goal`, un modo de prueba donde un agente usa el combinador hasta 20 mezclas, captura de preferencias para DPO (toggle "Help train the AI", activado por defecto: ante varias salidas candidatas el jugador elige la mejor y se guarda en `dpo_preference_events`), asignacion deterministica de emojis para conceptos sin emoji (`src/lib/emoji.ts`), perfil con logros destacados y leaderboard para objetivos completados.
 
 ```bash
 cd apps/web
@@ -632,6 +632,8 @@ npm run typecheck
 npm run test
 npm run build
 ```
+
+Hosting: la app corre en Cloud Run (deploy manual con `scripts/gcp/deploy_web_cloudrun.sh`, redeploys automaticos por push con `cloudbuild.web.yaml`), la base en Neon y el modelo Qwen en una VM GPU que se prende solo para demos (`scripts/gcp/model_vm.sh` o el panel `/admin` protegido con `ADMIN_DASH_USER`/`ADMIN_DASH_PASSWORD`); con la VM apagada el juego sigue funcionando con Gemini.
 
 Más detalles: [frontend_next_app.md](docs/codigo/frontend_next_app.md).
 

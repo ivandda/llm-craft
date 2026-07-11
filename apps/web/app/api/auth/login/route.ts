@@ -1,4 +1,4 @@
-import { loginUser, SESSION_COOKIE_NAME } from "@/lib/server/mockAuth";
+import { loginUser, sessionCookieOptions, SESSION_COOKIE_NAME } from "@/lib/server/mockAuth";
 import { NextResponse } from "next/server";
 
 export async function POST(request: Request) {
@@ -24,11 +24,7 @@ export async function POST(request: Request) {
   }
 
   const response = NextResponse.json({ user: result.user });
-  response.cookies.set(SESSION_COOKIE_NAME, result.sessionId, {
-    httpOnly: true,
-    sameSite: "lax",
-    path: "/"
-  });
+  response.cookies.set(SESSION_COOKIE_NAME, result.sessionId, sessionCookieOptions());
 
   return response;
 }

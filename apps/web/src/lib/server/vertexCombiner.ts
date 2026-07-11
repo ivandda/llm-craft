@@ -321,6 +321,20 @@ async function createAccessToken(
   return payload.access_token;
 }
 
+export async function getGoogleAccessToken(): Promise<string> {
+  if (process.env.GOOGLE_APPLICATION_CREDENTIALS?.trim()) {
+    return createAccessToken(await loadServiceAccountCredentials());
+  }
+
+  if (usesGceMetadataCredentials()) {
+    return createMetadataAccessToken();
+  }
+
+  throw new VertexConfigurationError(
+    "GOOGLE_APPLICATION_CREDENTIALS or VERTEX_USE_GCE_METADATA is not configured"
+  );
+}
+
 async function createMetadataAccessToken(): Promise<string> {
   const response = await fetch(GCE_METADATA_TOKEN_URL, {
     headers: { "Metadata-Flavor": "Google" },

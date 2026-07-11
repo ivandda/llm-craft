@@ -2,11 +2,13 @@
 
 import {
   requestCombination,
+  requestDpoCandidates,
   requestDpoPreference,
   requestLeaderboard,
   requestLeaderboardSubmission
 } from "@/lib/api";
 import { getCombinerModelLabel } from "@/lib/agentModels";
+import { getHueForConcept } from "@/lib/emoji";
 import { mergeInventory } from "@/lib/craft";
 import { selectDpoCandidates } from "@/lib/dpo";
 import { getInitialInventoryForMode } from "@/lib/gameModes";
@@ -23,6 +25,7 @@ import type {
 } from "@/lib/types";
 import {
   Brush,
+  Combine,
   LogOut,
   Menu,
   Moon,
@@ -40,12 +43,24 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type PointerEvent
 } from "react";
 
 const TOKEN_WIDTH = 132;
 const TOKEN_HEIGHT = 48;
 const RESULT_OFFSET = 18;
+// "Help train the AI" rounds fire on combinations 3, 8, 13, ... instead of on
+// every multi-candidate recipe, so the modal stays occasional.
+const DPO_ROUND_START = 3;
+const DPO_ROUND_INTERVAL = 5;
+
+function shouldTriggerDpoRound(combinationIndex: number): boolean {
+  return (
+    combinationIndex >= DPO_ROUND_START &&
+    (combinationIndex - DPO_ROUND_START) % DPO_ROUND_INTERVAL === 0
+  );
+}
 
 type CraftGameProps = {
   user: AuthUser;
@@ -90,6 +105,14 @@ type GoalCompletion = {
   isSaving: boolean;
   errorMessage?: string;
 };
+
+type Discovery = {
+  name: string;
+  emoji?: string;
+  isModelGenerated: boolean;
+};
+
+type SidebarTab = "elements" | "goal" | "settings";
 
 type PendingDpoChoice = {
   firstInput: ElementToken;
@@ -149,10 +172,40 @@ export function CraftGame({
   const [result, setResult] = useState<CombineResponse | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isCombining, setIsCombining] = useState(false);
-  const [dragState, setDragState] = useState<DragState | null>(null);
+  const [dragState, setDragStateValue] = useState<DragState | null>(null);
+  // Pointer handlers read this ref instead of React state: a fast click fires
+  // pointerdown+up before the state commit, which left a ghost drag preview
+  // following the cursor.
+  const dragStateRef = useRef<DragState | null>(null);
+  // Pointer position lives in a ref, not state: updating state per mousemove
+  // re-rendered every token on the board and made drags stutter.
+  const dragPointerRef = useRef<Point | null>(null);
+
+  function setDragState(next: DragState | null) {
+    dragStateRef.current = next;
+    dragPointerRef.current = next
+      ? { x: next.pointerX, y: next.pointerY }
+      : null;
+    setDragStateValue(next);
+  }
   const [isDarkMode, setIsDarkMode] = useState(false);
-  const [consumeInputsOnCombine, setConsumeInputsOnCombine] = useState(true);
-  const [isDpoTestMode, setIsDpoTestMode] = useState(false);
+  const [activeSidebarTab, setActiveSidebarTab] = useState<SidebarTab>(
+    mode === "goal" ? "goal" : "elements"
+  );
+  // The goal tab only exists in goal mode; fall back instead of rendering an
+  // empty panel if the stored selection no longer applies.
+  const sidebarTab: SidebarTab =
+    activeSidebarTab === "goal" && mode !== "goal" ? "elements" : activeSidebarTab;
+  const sidebarTabs = useMemo<{ id: SidebarTab; label: string }[]>(
+    () => [
+      { id: "elements", label: "Elements" },
+      ...(mode === "goal" ? [{ id: "goal" as const, label: "Goal" }] : []),
+      { id: "settings", label: "Settings" }
+    ],
+    [mode]
+  );
+  const [consumeInputsOnCombine, setConsumeInputsOnCombine] = useState(false);
+  const [isDpoTestMode, setIsDpoTestMode] = useState(true);
   const [pendingDpoChoice, setPendingDpoChoice] = useState<PendingDpoChoice | null>(
     null
   );
@@ -161,6 +214,14 @@ export function CraftGame({
   const [hasHydratedStorage, setHasHydratedStorage] = useState(false);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [goalCompletion, setGoalCompletion] = useState<GoalCompletion | null>(null);
+  const [discovery, setDiscovery] = useState<Discovery | null>(null);
+  const discoveryTimeoutRef = useRef<number | null>(null);
+  const [isOverBlackHole, setIsOverBlackHole] = useState(false);
+  const [vanishingToken, setVanishingToken] = useState<{
+    instanceId: string;
+    target: Point;
+  } | null>(null);
+  const vanishTimeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
     setHasHydratedStorage(false);
@@ -177,8 +238,8 @@ export function CraftGame({
         : createInitialBoard(storedInventory)
     );
     setIsDarkMode(readStoredValue(storageKeys.darkMode, false));
-    setConsumeInputsOnCombine(readStoredValue(storageKeys.consumeInputs, true));
-    setIsDpoTestMode(readStoredValue(storageKeys.dpoTestMode, false));
+    setConsumeInputsOnCombine(readStoredValue(storageKeys.consumeInputs, false));
+    setIsDpoTestMode(readStoredValue(storageKeys.dpoTestMode, true));
     setPendingDpoChoice(null);
     setResult(null);
     setErrorMessage(null);
@@ -245,10 +306,70 @@ export function CraftGame({
     onSnapshotChange?.({ inventory, history });
   }, [history, inventory, onSnapshotChange]);
 
+  // Initial board positions are precomputed for a wide board; on a narrow
+  // phone (or after an orientation change) they would strand tokens off the
+  // right edge. Clamp tokens into view on mount and when the board's WIDTH
+  // changes — deliberately ignoring height, because mobile browser chrome
+  // constantly changes the dvh-based height and clamping on that jitter would
+  // slowly migrate tokens toward the top-left (and persist the damage).
+  useEffect(() => {
+    const board = boardRef.current;
+
+    if (!board || !hasHydratedStorage) {
+      return;
+    }
+
+    let lastWidth = 0;
+
+    const clampIntoViewOnWidthChange = () => {
+      // Never reposition while dragging — it would yank the token under the
+      // pointer out from under the user.
+      if (dragStateRef.current) {
+        return;
+      }
+
+      const rect = board.getBoundingClientRect();
+
+      if (rect.width === 0 || rect.height === 0 || rect.width === lastWidth) {
+        return;
+      }
+
+      lastWidth = rect.width;
+
+      setBoardElements((currentElements) => {
+        let hasChanges = false;
+        const nextElements = currentElements.map((element) => {
+          const clamped = clampBoardPosition(element.x, element.y, rect);
+
+          if (clamped.x !== element.x || clamped.y !== element.y) {
+            hasChanges = true;
+            return { ...element, x: clamped.x, y: clamped.y };
+          }
+
+          return element;
+        });
+
+        return hasChanges ? nextElements : currentElements;
+      });
+    };
+
+    clampIntoViewOnWidthChange();
+    const observer = new ResizeObserver(clampIntoViewOnWidthChange);
+    observer.observe(board);
+
+    return () => observer.disconnect();
+  }, [hasHydratedStorage]);
+
   useEffect(() => {
     return () => {
       if (sweepTimeoutRef.current !== null) {
         window.clearTimeout(sweepTimeoutRef.current);
+      }
+      if (discoveryTimeoutRef.current !== null) {
+        window.clearTimeout(discoveryTimeoutRef.current);
+      }
+      if (vanishTimeoutRef.current !== null) {
+        window.clearTimeout(vanishTimeoutRef.current);
       }
     };
   }, []);
@@ -305,7 +426,10 @@ export function CraftGame({
     clientX: number,
     clientY: number
   ) {
-    const position = getBoardPosition(clientX, clientY);
+    // A release outside the board (including a plain click on an inventory
+    // item) still places the element, near the board center.
+    const position =
+      getBoardPosition(clientX, clientY) ?? getFallbackBoardPosition();
 
     if (!position) {
       return;
@@ -341,23 +465,24 @@ export function CraftGame({
         model: selectedCombinerModel
       });
       const combinationsUsed = history.length + 1;
-      const dpoCandidates = isDpoTestMode
-        ? selectDpoCandidates(response.knownOutputs)
-        : [];
 
-      if (dpoCandidates.length >= 2) {
-        setPendingDpoChoice({
-          firstInput,
-          secondInput,
-          response,
-          candidates: dpoCandidates,
-          clientX,
-          clientY,
-          usedInstanceIds,
-          combinationIndex: combinationsUsed,
-          isSaving: false
-        });
-        return;
+      if (isDpoTestMode && shouldTriggerDpoRound(combinationsUsed)) {
+        const dpoCandidates = await fetchDpoCandidates(firstInput, secondInput);
+
+        if (dpoCandidates.length >= 2) {
+          setPendingDpoChoice({
+            firstInput,
+            secondInput,
+            response,
+            candidates: dpoCandidates,
+            clientX,
+            clientY,
+            usedInstanceIds,
+            combinationIndex: combinationsUsed,
+            isSaving: false
+          });
+          return;
+        }
       }
 
       applyCombinationResult({
@@ -375,6 +500,43 @@ export function CraftGame({
     } finally {
       setIsCombining(false);
     }
+  }
+
+  async function fetchDpoCandidates(
+    firstInput: ElementToken,
+    secondInput: ElementToken
+  ): Promise<ElementToken[]> {
+    try {
+      const { candidates } = await requestDpoCandidates({
+        inputA: firstInput,
+        inputB: secondInput,
+        inventory,
+        model: selectedCombinerModel
+      });
+
+      return selectDpoCandidates(candidates);
+    } catch {
+      // A failed round never blocks the game; the combination applies normally.
+      return [];
+    }
+  }
+
+  function skipDpoChoice() {
+    if (!pendingDpoChoice) {
+      return;
+    }
+
+    applyCombinationResult({
+      firstInput: pendingDpoChoice.firstInput,
+      secondInput: pendingDpoChoice.secondInput,
+      response: pendingDpoChoice.response,
+      output: pendingDpoChoice.response.result,
+      clientX: pendingDpoChoice.clientX,
+      clientY: pendingDpoChoice.clientY,
+      usedInstanceIds: pendingDpoChoice.usedInstanceIds,
+      combinationsUsed: pendingDpoChoice.combinationIndex
+    });
+    setPendingDpoChoice(null);
   }
 
   async function selectDpoOutput(output: ElementToken) {
@@ -429,9 +591,27 @@ export function CraftGame({
     const discoveredAt = new Date().toISOString();
     const output = { ...input.output, discoveredAt };
     const nextResult = { ...input.response, result: output };
+    const isNewDiscovery = !inventory.some((element) => element.id === output.id);
 
     setResult(nextResult);
     setInventory((currentInventory) => mergeInventory(currentInventory, output));
+
+    if (isNewDiscovery) {
+      setDiscovery({
+        name: output.name,
+        emoji: output.emoji,
+        isModelGenerated: input.response.source === "model_generated"
+      });
+
+      if (discoveryTimeoutRef.current !== null) {
+        window.clearTimeout(discoveryTimeoutRef.current);
+      }
+
+      discoveryTimeoutRef.current = window.setTimeout(() => {
+        setDiscovery(null);
+        discoveryTimeoutRef.current = null;
+      }, 2500);
+    }
     setBoardElements((currentElements) => {
       const remainingElements = consumeInputsOnCombine
         ? currentElements.filter(
@@ -506,6 +686,20 @@ export function CraftGame({
     return clampBoardPosition(
       clientX - rect.left - TOKEN_WIDTH / 2,
       clientY - rect.top - TOKEN_HEIGHT / 2,
+      rect
+    );
+  }
+
+  function getFallbackBoardPosition(): Point | null {
+    const rect = boardRef.current?.getBoundingClientRect();
+
+    if (!rect) {
+      return null;
+    }
+
+    return clampBoardPosition(
+      rect.width / 2 - TOKEN_WIDTH / 2 + (Math.random() - 0.5) * 140,
+      rect.height / 2 - TOKEN_HEIGHT / 2 + (Math.random() - 0.5) * 140,
       rect
     );
   }
@@ -594,7 +788,34 @@ export function CraftGame({
   function isReleaseOnBlackHole(clientX: number, clientY: number): boolean {
     const blackHoleRect = blackHoleRef.current?.getBoundingClientRect();
 
-    return Boolean(blackHoleRect && isPointInsideRect(clientX, clientY, blackHoleRect));
+    if (!blackHoleRect) {
+      return false;
+    }
+
+    // The visual is a circle; a rect test deletes drops that look outside it.
+    const centerX = blackHoleRect.left + blackHoleRect.width / 2;
+    const centerY = blackHoleRect.top + blackHoleRect.height / 2;
+
+    return (
+      Math.hypot(clientX - centerX, clientY - centerY) <= blackHoleRect.width / 2
+    );
+  }
+
+  function swallowBoardElement(instanceId: string) {
+    if (vanishTimeoutRef.current !== null) {
+      window.clearTimeout(vanishTimeoutRef.current);
+
+      if (vanishingToken) {
+        removeBoardElement(vanishingToken.instanceId);
+      }
+    }
+
+    setVanishingToken({ instanceId, target: getBlackHoleCenterInBoard() });
+    vanishTimeoutRef.current = window.setTimeout(() => {
+      removeBoardElement(instanceId);
+      setVanishingToken(null);
+      vanishTimeoutRef.current = null;
+    }, 320);
   }
 
   function getBlackHoleCenterInBoard(): Point {
@@ -635,28 +856,34 @@ export function CraftGame({
   }
 
   function updateInventoryDrag(event: PointerEvent<HTMLButtonElement>) {
-    if (dragState?.kind !== "inventory") {
+    const drag = dragStateRef.current;
+
+    if (drag?.kind !== "inventory") {
       return;
     }
 
-    setDragState({
-      ...dragState,
-      pointerX: event.clientX,
-      pointerY: event.clientY
-    });
+    dragPointerRef.current = { x: event.clientX, y: event.clientY };
+    setIsOverBlackHole(isReleaseOnBlackHole(event.clientX, event.clientY));
   }
 
   async function finishInventoryDrag(event: PointerEvent<HTMLButtonElement>) {
-    if (dragState?.kind !== "inventory") {
+    const drag = dragStateRef.current;
+
+    if (drag?.kind !== "inventory") {
       return;
     }
 
     event.currentTarget.releasePointerCapture(event.pointerId);
 
     const target = findDropTarget(event.clientX, event.clientY);
-    const element = dragState.element;
+    const element = drag.element;
 
     setDragState(null);
+    setIsOverBlackHole(false);
+
+    if (isReleaseOnBlackHole(event.clientX, event.clientY)) {
+      return;
+    }
 
     if (target) {
       await combineElementsOnBoard(
@@ -694,20 +921,26 @@ export function CraftGame({
   }
 
   function updateBoardDrag(event: PointerEvent<HTMLButtonElement>) {
-    if (dragState?.kind !== "board" || !dragState.instanceId) {
+    const drag = dragStateRef.current;
+
+    if (drag?.kind !== "board" || !drag.instanceId) {
       return;
     }
 
-    setDragState({
-      ...dragState,
-      pointerX: event.clientX,
-      pointerY: event.clientY
-    });
-    moveBoardElement(dragState.instanceId, event.clientX, event.clientY);
+    dragPointerRef.current = { x: event.clientX, y: event.clientY };
+    moveBoardElement(drag.instanceId, event.clientX, event.clientY);
+    setIsOverBlackHole(isReleaseOnBlackHole(event.clientX, event.clientY));
+  }
+
+  function cancelActiveDrag() {
+    setDragState(null);
+    setIsOverBlackHole(false);
   }
 
   async function finishBoardDrag(event: PointerEvent<HTMLButtonElement>) {
-    if (dragState?.kind !== "board" || !dragState.instanceId) {
+    const drag = dragStateRef.current;
+
+    if (drag?.kind !== "board" || !drag.instanceId) {
       return;
     }
 
@@ -716,15 +949,16 @@ export function CraftGame({
     const target = findDropTarget(
       event.clientX,
       event.clientY,
-      dragState.instanceId
+      drag.instanceId
     );
-    const element = dragState.element;
-    const instanceId = dragState.instanceId;
+    const element = drag.element;
+    const instanceId = drag.instanceId;
 
     setDragState(null);
+    setIsOverBlackHole(false);
 
     if (isReleaseOnBlackHole(event.clientX, event.clientY)) {
-      removeBoardElement(instanceId);
+      swallowBoardElement(instanceId);
       return;
     }
 
@@ -742,78 +976,27 @@ export function CraftGame({
 
   return (
     <main
-      className={`h-screen overflow-hidden ${
-        isDarkMode ? "dark bg-zinc-950 text-zinc-50" : "bg-stone-100 text-zinc-950"
+      className={`h-[100dvh] overflow-hidden ${
+        isDarkMode ? "dark bg-zinc-950 text-zinc-50" : "bg-paper text-ink"
       }`}
     >
-      <div className="grid h-screen grid-cols-1 grid-rows-[minmax(0,1fr)_minmax(0,42vh)] overflow-hidden lg:grid-cols-[minmax(0,1fr)_320px] lg:grid-rows-1">
-        <section className="relative min-h-0 overflow-hidden border-b border-zinc-200 bg-[#f6f2e8] dark:border-zinc-800 dark:bg-zinc-900 lg:border-b-0 lg:border-r">
-          <div className="absolute left-4 top-4 z-30 flex items-center gap-3 rounded-md border border-zinc-200 bg-white/90 px-3 py-2 shadow-hairline backdrop-blur dark:border-zinc-700 dark:bg-zinc-950/85">
+      <div className="grid h-[100dvh] grid-cols-1 grid-rows-[minmax(0,1fr)_minmax(0,44dvh)] overflow-hidden lg:grid-cols-[minmax(0,1fr)_320px] lg:grid-rows-1">
+        <section className="relative min-h-0 overflow-hidden border-b border-linen bg-paper dark:border-zinc-800 dark:bg-zinc-900 lg:border-b-0 lg:border-r">
+          <div className="absolute left-4 top-4 z-30 flex items-center gap-3 rounded-md border border-linen bg-surface/90 px-3 py-2 shadow-hairline backdrop-blur dark:border-zinc-700 dark:bg-zinc-950/85">
+            <button
+              className="flex h-9 items-center gap-2 rounded-md border border-linen px-3 font-mono text-xs uppercase tracking-wider text-soot transition hover:bg-paper hover:text-ink dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-50"
+              onClick={onBackToMenu}
+              type="button"
+            >
+              <Menu size={14} />
+              Menu
+            </button>
             <div>
-              <h1 className="text-base font-semibold tracking-normal">llm-craft</h1>
-              <p className="text-xs text-zinc-500 dark:text-zinc-400">
+              <h1 className="font-display text-base font-semibold tracking-normal">llm-craft</h1>
+              <p className="font-mono text-xs text-soot dark:text-zinc-400">
                 {mode === "goal" ? "Goal" : "Sandbox"} · {boardElements.length} on board
               </p>
             </div>
-            <button
-              aria-label="Back to modes"
-              className="grid size-9 place-items-center rounded-md border border-zinc-200 text-zinc-600 transition hover:bg-zinc-100 hover:text-zinc-950 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-50"
-              onClick={onBackToMenu}
-              title="Modes"
-              type="button"
-            >
-              <Menu size={16} />
-            </button>
-            <button
-              aria-label="Profile"
-              className="grid size-9 place-items-center rounded-md border border-zinc-200 text-zinc-600 transition hover:bg-zinc-100 hover:text-zinc-950 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-50"
-              onClick={() => onOpenProfile({ inventory, history })}
-              title="Profile"
-              type="button"
-            >
-              <UserCircle size={16} />
-            </button>
-            <button
-              aria-label={isDarkMode ? "Use light mode" : "Use dark mode"}
-              className="grid size-9 place-items-center rounded-md border border-zinc-200 text-zinc-600 transition hover:bg-zinc-100 hover:text-zinc-950 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-50"
-              onClick={() => setIsDarkMode((currentValue) => !currentValue)}
-              title={isDarkMode ? "Light mode" : "Dark mode"}
-              type="button"
-            >
-              {isDarkMode ? <Sun size={16} /> : <Moon size={16} />}
-            </button>
-            {mode === "sandbox" ? (
-              <>
-                <button
-                  aria-label="Clear sandbox"
-                  className="grid size-9 place-items-center rounded-md border border-zinc-200 text-zinc-600 transition hover:bg-zinc-100 hover:text-zinc-950 disabled:cursor-not-allowed disabled:opacity-45 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-50"
-                  disabled={boardElements.length === 0 || isSweeping}
-                  onClick={clearSandboxWithSweep}
-                  title="Clear sandbox"
-                  type="button"
-                >
-                  <Brush size={16} />
-                </button>
-                <button
-                  aria-label="Reset"
-                  className="grid size-9 place-items-center rounded-md border border-zinc-200 text-zinc-600 transition hover:bg-zinc-100 hover:text-zinc-950 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-50"
-                  onClick={() => resetGame()}
-                  title="Reset"
-                  type="button"
-                >
-                  <RotateCcw size={16} />
-                </button>
-              </>
-            ) : null}
-            <button
-              aria-label="Log out"
-              className="grid size-9 place-items-center rounded-md border border-zinc-200 text-zinc-600 transition hover:bg-zinc-100 hover:text-zinc-950 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-50"
-              onClick={onLogout}
-              title="Log out"
-              type="button"
-            >
-              <LogOut size={16} />
-            </button>
           </div>
 
           <div
@@ -822,12 +1005,13 @@ export function CraftGame({
             style={{
               backgroundImage: isDarkMode
                 ? "radial-gradient(circle at 1px 1px, rgba(244,244,245,0.11) 1px, transparent 0)"
-                : "radial-gradient(circle at 1px 1px, rgba(39,39,42,0.1) 1px, transparent 0)",
+                : "radial-gradient(circle at 1px 1px, rgba(38,34,27,0.1) 1px, transparent 0)",
               backgroundSize: "28px 28px"
             }}
           >
             <BlackHoleDropZone
-              isActive={dragState?.kind === "board" || isSweeping}
+              isActive={dragState !== null || isSweeping || vanishingToken !== null}
+              isHot={isOverBlackHole}
               ref={blackHoleRef}
             />
             {isSweeping && sweepTarget ? (
@@ -840,13 +1024,37 @@ export function CraftGame({
                 isDragging={dragState?.instanceId === element.instanceId}
                 isSweeping={isSweeping}
                 key={element.instanceId}
+                onPointerCancel={cancelActiveDrag}
                 onPointerDown={beginBoardDrag}
                 onPointerMove={updateBoardDrag}
                 onPointerUp={finishBoardDrag}
                 sweepTarget={sweepTarget}
+                vanishTarget={
+                  vanishingToken?.instanceId === element.instanceId
+                    ? vanishingToken.target
+                    : null
+                }
               />
             ))}
           </div>
+
+          {mode === "goal" && goalPreset ? (
+            <GoalBanner
+              combinationsUsed={history.length}
+              isComplete={goalCompletion !== null}
+              par={goalPreset.metadata.minDepth ?? goalPreset.metadata.depth}
+              target={goalPreset.target}
+            />
+          ) : null}
+
+          {history.length === 0 && !isCombining && !goalCompletion ? (
+            <div className="pointer-events-none absolute inset-x-0 bottom-8 z-10 flex justify-center px-4">
+              <p className="max-w-md rounded-md border border-dashed border-linen bg-surface/85 px-4 py-3 text-center text-sm text-soot backdrop-blur dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-400">
+                Drag one element onto another to combine them
+                {mode === "goal" ? " — craft your way to the goal element" : ""}.
+              </p>
+            </div>
+          ) : null}
 
           <StatusToast
             errorMessage={errorMessage}
@@ -854,113 +1062,212 @@ export function CraftGame({
             isCombining={isCombining}
             result={result}
           />
+
+          {discovery ? (
+            <div className="pointer-events-none absolute inset-x-0 top-20 z-40 flex justify-center">
+              <div
+                className="discovery-badge flex max-w-[calc(100%-2rem)] items-center gap-3 rounded-md border border-linen bg-surface px-4 py-2.5 shadow-lift dark:border-zinc-700 dark:bg-zinc-900"
+                key={discovery.name}
+              >
+                <span className="text-2xl">{discovery.emoji ?? "·"}</span>
+                <span className="truncate text-sm font-semibold capitalize">
+                  {discovery.name}
+                </span>
+                <span className="shrink-0 font-mono text-xs uppercase tracking-wider text-cobalt">
+                  {discovery.isModelGenerated
+                    ? "New — invented by the model"
+                    : "First discovery"}
+                </span>
+              </div>
+            </div>
+          ) : null}
         </section>
 
         <aside
-          className={`flex min-h-0 flex-col overflow-hidden bg-white p-4 transition-colors dark:bg-zinc-950 ${
+          className={`flex min-h-0 flex-col overflow-hidden p-4 transition-colors ${
             dragState?.kind === "board"
-              ? "bg-zinc-50 dark:bg-zinc-900"
-              : ""
+              ? "bg-paper dark:bg-zinc-900"
+              : "bg-surface dark:bg-zinc-950"
           }`}
         >
-          {mode === "goal" && goalPreset ? (
-            <GoalSidePanel
-              goalDepth={goalDepth}
-              goalGenerationMessage={goalGenerationMessage}
-              goalPreset={goalPreset}
-              isGeneratingGoal={isGeneratingGoal}
-              leaderboard={leaderboard}
-              onGenerateNewGoal={generateNewGoal}
-              onGoalDepthChange={onGoalDepthChange}
-              onReset={() => resetGame()}
-            />
-          ) : null}
-
-          <div className="mb-4">
-            <div className="flex items-end justify-between gap-3">
-              <div>
-                <h2 className="text-base font-semibold">Inventory</h2>
-                <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-                  {inventory.length} discovered by {user.displayName}
-                </p>
-              </div>
-              <Sparkles className="text-zinc-400 dark:text-zinc-500" size={18} />
-            </div>
-
-            <label className="relative mt-4 block">
-              <Search
-                aria-hidden="true"
-                className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 dark:text-zinc-500"
-                size={16}
-              />
-              <input
-                className="h-10 w-full rounded-md border border-zinc-200 bg-zinc-50 pl-9 pr-3 text-sm outline-none transition placeholder:text-zinc-400 focus:border-zinc-400 focus:bg-white dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50 dark:placeholder:text-zinc-500 dark:focus:border-zinc-500 dark:focus:bg-zinc-950"
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="Search"
-                value={query}
-              />
-            </label>
-
-            <label className="mt-3 flex min-h-11 items-center justify-between gap-3 rounded-md border border-zinc-200 bg-zinc-50 px-3 text-sm font-medium dark:border-zinc-700 dark:bg-zinc-900">
-              <span>Consume inputs</span>
-              <input
-                checked={consumeInputsOnCombine}
-                className="size-4 accent-zinc-950 dark:accent-zinc-50"
-                onChange={(event) => setConsumeInputsOnCombine(event.target.checked)}
-                type="checkbox"
-              />
-            </label>
-            <label className="mt-2 flex min-h-11 items-center justify-between gap-3 rounded-md border border-zinc-200 bg-zinc-50 px-3 text-sm font-medium dark:border-zinc-700 dark:bg-zinc-900">
-              <span>DPO test mode</span>
-              <input
-                checked={isDpoTestMode}
-                className="size-4 accent-zinc-950 dark:accent-zinc-50"
-                onChange={(event) => setIsDpoTestMode(event.target.checked)}
-                type="checkbox"
-              />
-            </label>
-          </div>
-
-          <div className="grid min-h-0 flex-1 grid-cols-2 content-start gap-2 overflow-y-auto pr-1">
-            {filteredInventory.map((element) => (
-              <InventoryToken
-                element={element}
-                key={element.id}
-                onPointerDown={beginInventoryDrag}
-                onPointerMove={updateInventoryDrag}
-                onPointerUp={finishInventoryDrag}
-              />
+          <div className="mb-4 flex shrink-0 gap-1 rounded-md border border-linen bg-paper p-1 dark:border-zinc-800 dark:bg-zinc-900">
+            {sidebarTabs.map((tab) => (
+              <button
+                className={`h-8 flex-1 rounded font-mono text-xs uppercase tracking-wider transition ${
+                  sidebarTab === tab.id
+                    ? "bg-surface text-ink shadow-hairline dark:bg-zinc-950 dark:text-zinc-50"
+                    : "text-soot hover:text-ink dark:text-zinc-400 dark:hover:text-zinc-200"
+                }`}
+                key={tab.id}
+                onClick={() => setActiveSidebarTab(tab.id)}
+                type="button"
+              >
+                {tab.label}
+              </button>
             ))}
           </div>
 
-          <div className="mt-5 min-h-0 shrink-0 border-t border-zinc-200 pt-4 dark:border-zinc-800">
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <h2 className="text-base font-semibold">Recent</h2>
-              <span className="text-sm text-zinc-500 dark:text-zinc-400">
-                {history.length}
-              </span>
-            </div>
+          {sidebarTab === "elements" ? (
+            <>
+              <div className="mb-3 shrink-0">
+                <label className="relative block">
+                  <Search
+                    aria-hidden="true"
+                    className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-soot dark:text-zinc-500"
+                    size={16}
+                  />
+                  <input
+                    className="h-10 w-full rounded-md border border-linen bg-paper pl-9 pr-3 text-sm outline-none transition placeholder:text-soot focus:border-cobalt focus:bg-surface dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50 dark:placeholder:text-zinc-500 dark:focus:border-zinc-500 dark:focus:bg-zinc-950"
+                    onChange={(event) => setQuery(event.target.value)}
+                    placeholder="Search"
+                    value={query}
+                  />
+                </label>
+                <p className="mt-2 text-right font-mono text-xs text-soot dark:text-zinc-400">
+                  {inventory.length} elements
+                </p>
+              </div>
 
-            <div className="grid max-h-52 gap-2 overflow-y-auto pr-1 lg:max-h-[220px]">
-              {history.length === 0 ? (
-                <div className="rounded-md border border-dashed border-zinc-200 p-4 text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
-                  No recipes yet.
+              <div className="grid min-h-0 flex-1 grid-cols-2 content-start gap-2 overflow-y-auto pr-1">
+                {filteredInventory.map((element) => (
+                  <InventoryToken
+                    element={element}
+                    key={element.id}
+                    onPointerCancel={cancelActiveDrag}
+                    onPointerDown={beginInventoryDrag}
+                    onPointerMove={updateInventoryDrag}
+                    onPointerUp={finishInventoryDrag}
+                  />
+                ))}
+              </div>
+
+              <div className="mt-5 min-h-0 shrink-0 border-t border-linen pt-4 dark:border-zinc-800">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <h2 className="text-base font-semibold">Recent</h2>
+                  <span className="font-mono text-xs text-soot dark:text-zinc-400">
+                    {history.length}
+                  </span>
                 </div>
-              ) : (
-                history.slice(0, 8).map((item) => (
-                  <RecipeCard item={item} key={item.id} />
-                ))
-              )}
+
+                <div className="grid max-h-52 gap-2 overflow-y-auto pr-1 lg:max-h-[220px]">
+                  {history.length === 0 ? (
+                    <div className="rounded-md border border-dashed border-linen p-4 text-sm text-soot dark:border-zinc-700 dark:text-zinc-400">
+                      No recipes yet.
+                    </div>
+                  ) : (
+                    history.slice(0, 8).map((item) => (
+                      <RecipeCard item={item} key={item.id} />
+                    ))
+                  )}
+                </div>
+              </div>
+            </>
+          ) : null}
+
+          {sidebarTab === "goal" && mode === "goal" && goalPreset ? (
+            <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+              <GoalTabPanel
+                goalDepth={goalDepth}
+                goalGenerationMessage={goalGenerationMessage}
+                goalPreset={goalPreset}
+                isGeneratingGoal={isGeneratingGoal}
+                leaderboard={leaderboard}
+                onGenerateNewGoal={generateNewGoal}
+                onGoalDepthChange={onGoalDepthChange}
+                onReset={() => resetGame()}
+              />
             </div>
-          </div>
+          ) : null}
+
+          {sidebarTab === "settings" ? (
+            <div className="grid min-h-0 flex-1 content-start gap-2 overflow-y-auto pr-1">
+              <label className="flex min-h-11 items-center gap-3 rounded-md border border-linen bg-paper px-3 text-sm font-medium dark:border-zinc-700 dark:bg-zinc-900">
+                <Combine className="shrink-0 text-soot dark:text-zinc-400" size={16} />
+                <span className="flex-1">Consume inputs</span>
+                <input
+                  checked={consumeInputsOnCombine}
+                  className="size-4 accent-cobalt dark:accent-zinc-50"
+                  onChange={(event) => setConsumeInputsOnCombine(event.target.checked)}
+                  type="checkbox"
+                />
+              </label>
+              <label className="flex min-h-11 items-center gap-3 rounded-md border border-linen bg-paper px-3 text-sm font-medium dark:border-zinc-700 dark:bg-zinc-900">
+                <Sparkles className="shrink-0 text-soot dark:text-zinc-400" size={16} />
+                <span className="flex-1">Help train the AI</span>
+                <input
+                  checked={isDpoTestMode}
+                  className="size-4 accent-cobalt dark:accent-zinc-50"
+                  onChange={(event) => setIsDpoTestMode(event.target.checked)}
+                  type="checkbox"
+                />
+              </label>
+              <label className="flex min-h-11 items-center gap-3 rounded-md border border-linen bg-paper px-3 text-sm font-medium dark:border-zinc-700 dark:bg-zinc-900">
+                {isDarkMode ? (
+                  <Sun className="shrink-0 text-soot dark:text-zinc-400" size={16} />
+                ) : (
+                  <Moon className="shrink-0 text-soot dark:text-zinc-400" size={16} />
+                )}
+                <span className="flex-1">Dark mode</span>
+                <input
+                  checked={isDarkMode}
+                  className="size-4 accent-cobalt dark:accent-zinc-50"
+                  onChange={(event) => setIsDarkMode(event.target.checked)}
+                  type="checkbox"
+                />
+              </label>
+
+              <div className="my-1 border-t border-linen dark:border-zinc-800" />
+
+              <button
+                className="flex min-h-11 w-full items-center gap-3 rounded-md border border-linen bg-paper px-3 text-left text-sm font-medium transition hover:bg-surface dark:border-zinc-700 dark:bg-zinc-900 dark:hover:bg-zinc-800"
+                onClick={() => onOpenProfile({ inventory, history })}
+                type="button"
+              >
+                <UserCircle className="shrink-0 text-soot dark:text-zinc-400" size={16} />
+                Profile
+              </button>
+              {mode === "sandbox" ? (
+                <>
+                  <button
+                    className="flex min-h-11 w-full items-center gap-3 rounded-md border border-linen bg-paper px-3 text-left text-sm font-medium transition hover:bg-surface disabled:cursor-not-allowed disabled:opacity-45 dark:border-zinc-700 dark:bg-zinc-900 dark:hover:bg-zinc-800"
+                    disabled={boardElements.length === 0 || isSweeping}
+                    onClick={clearSandboxWithSweep}
+                    type="button"
+                  >
+                    <Brush className="shrink-0 text-soot dark:text-zinc-400" size={16} />
+                    Clear board
+                  </button>
+                  <button
+                    className="flex min-h-11 w-full items-center gap-3 rounded-md border border-linen bg-paper px-3 text-left text-sm font-medium transition hover:bg-surface dark:border-zinc-700 dark:bg-zinc-900 dark:hover:bg-zinc-800"
+                    onClick={() => resetGame()}
+                    type="button"
+                  >
+                    <RotateCcw className="shrink-0 text-soot dark:text-zinc-400" size={16} />
+                    Reset progress
+                  </button>
+                </>
+              ) : null}
+              <button
+                className="flex min-h-11 w-full items-center gap-3 rounded-md border border-linen bg-paper px-3 text-left text-sm font-medium transition hover:bg-surface dark:border-zinc-700 dark:bg-zinc-900 dark:hover:bg-zinc-800"
+                onClick={onLogout}
+                type="button"
+              >
+                <LogOut className="shrink-0 text-soot dark:text-zinc-400" size={16} />
+                Log out
+              </button>
+            </div>
+          ) : null}
         </aside>
       </div>
 
-      {dragState?.kind === "inventory" ? <DragPreview dragState={dragState} /> : null}
+      {dragState?.kind === "inventory" ? (
+        <DragPreview dragState={dragState} pointerRef={dragPointerRef} />
+      ) : null}
       {pendingDpoChoice ? (
         <DpoChoiceModal
           choice={pendingDpoChoice}
           onSelect={selectDpoOutput}
+          onSkip={skipDpoChoice}
         />
       ) : null}
       {goalCompletion && goalPreset ? (
@@ -970,14 +1277,14 @@ export function CraftGame({
           target={goalPreset.target}
           userId={user.id}
           onBackToMenu={onBackToMenu}
-          onReset={resetGame}
+          onReset={() => resetGame()}
         />
       ) : null}
     </main>
   );
 }
 
-function GoalSidePanel({
+function GoalTabPanel({
   goalDepth,
   goalGenerationMessage,
   goalPreset,
@@ -997,41 +1304,45 @@ function GoalSidePanel({
   onReset: () => void;
 }) {
   return (
-    <div className="mb-4 grid gap-3 rounded-md border border-emerald-200 bg-emerald-50 p-3 dark:border-emerald-900 dark:bg-emerald-950/30">
+    <div className="grid gap-3 rounded-md border border-linen bg-paper p-3 dark:border-emerald-900 dark:bg-emerald-950/30">
       <div className="flex items-start gap-3">
-        <Target className="mt-0.5 shrink-0 text-emerald-700 dark:text-emerald-400" size={18} />
+        <Target className="mt-0.5 shrink-0 text-cobalt dark:text-emerald-400" size={18} />
         <div className="min-w-0">
+          <p className="font-mono text-xs font-semibold uppercase tracking-wider text-cobalt dark:text-emerald-400">
+            Goal
+          </p>
           <h2 className="truncate text-sm font-semibold">{goalPreset.title}</h2>
-          <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
+          <p className="mt-1 text-sm text-soot dark:text-zinc-300">
             {goalPreset.objective}
           </p>
         </div>
       </div>
 
       <div className="grid grid-cols-2 gap-2">
-        <div className="rounded-md border border-emerald-200 bg-white px-3 py-2 dark:border-emerald-900 dark:bg-zinc-950">
-          <p className="text-xs text-zinc-500 dark:text-zinc-400">Depth</p>
-          <p className="mt-1 text-sm font-semibold">
+        <div className="rounded-md border border-linen bg-surface px-3 py-2 dark:border-emerald-900 dark:bg-zinc-950">
+          <p className="font-mono text-xs uppercase tracking-wider text-soot dark:text-zinc-400">Depth</p>
+          <p className="mt-1 font-mono text-sm font-semibold">
             {goalPreset.metadata.minDepth ?? goalPreset.metadata.depth}
           </p>
         </div>
-        <div className="rounded-md border border-emerald-200 bg-white px-3 py-2 dark:border-emerald-900 dark:bg-zinc-950">
-          <p className="text-xs text-zinc-500 dark:text-zinc-400">Start</p>
-          <p className="mt-1 truncate text-sm font-semibold capitalize">
+        <div className="rounded-md border border-linen bg-surface px-3 py-2 dark:border-emerald-900 dark:bg-zinc-950">
+          <p className="font-mono text-xs uppercase tracking-wider text-soot dark:text-zinc-400">Start</p>
+          <p className="mt-1 truncate font-mono text-sm font-semibold capitalize">
             {goalPreset.metadata.initialInventoryId ?? "fallback"}
           </p>
         </div>
       </div>
 
       <div>
-        <p className="mb-2 text-xs font-semibold text-zinc-500 dark:text-zinc-400">
+        <p className="mb-2 font-mono text-xs font-semibold uppercase tracking-wider text-soot dark:text-zinc-400">
           Initial inventory
         </p>
         <div className="flex flex-wrap gap-1.5">
           {goalPreset.initialInventory.map((element) => (
             <span
-              className="max-w-full truncate rounded border border-emerald-200 bg-white px-2 py-1 text-xs capitalize dark:border-emerald-900 dark:bg-zinc-950"
+              className="element-card max-w-full truncate rounded border px-2 py-1 text-xs capitalize"
               key={element.id}
+              style={{ "--el-hue": getHueForConcept(element.name) } as CSSProperties}
             >
               {formatElementName(element)}
             </span>
@@ -1039,10 +1350,10 @@ function GoalSidePanel({
         </div>
       </div>
 
-      <label className="grid gap-1 text-sm font-medium text-zinc-700 dark:text-zinc-200">
+      <label className="grid gap-1 text-sm font-medium text-ink dark:text-zinc-200">
         <span>Goal depth</span>
         <select
-          className="h-9 rounded-md border border-emerald-200 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 disabled:cursor-wait disabled:opacity-60 dark:border-emerald-900 dark:bg-zinc-950"
+          className="h-9 rounded-md border border-linen bg-surface px-3 text-sm outline-none transition focus:border-cobalt disabled:cursor-wait disabled:opacity-60 dark:border-emerald-900 dark:bg-zinc-950"
           disabled={isGeneratingGoal}
           onChange={(event) => onGoalDepthChange(Number(event.target.value))}
           value={goalDepth}
@@ -1057,7 +1368,7 @@ function GoalSidePanel({
 
       <div className="grid grid-cols-2 gap-2">
         <button
-          className="flex h-10 items-center justify-center gap-2 rounded-md border border-emerald-200 bg-white px-3 text-sm font-semibold transition hover:bg-emerald-50 dark:border-emerald-900 dark:bg-zinc-950 dark:hover:bg-emerald-950/50"
+          className="flex h-10 items-center justify-center gap-2 rounded-md border border-linen bg-surface px-3 text-sm font-semibold transition hover:bg-paper dark:border-emerald-900 dark:bg-zinc-950 dark:hover:bg-emerald-950/50"
           disabled={isGeneratingGoal}
           onClick={onReset}
           type="button"
@@ -1066,7 +1377,7 @@ function GoalSidePanel({
           Reset
         </button>
         <button
-          className="flex h-10 items-center justify-center gap-2 rounded-md bg-emerald-700 px-3 text-sm font-semibold text-white transition hover:bg-emerald-800 disabled:cursor-wait disabled:opacity-60"
+          className="flex h-10 items-center justify-center gap-2 rounded-md bg-cobalt px-3 text-sm font-semibold text-white transition hover:bg-cobalt-deep disabled:cursor-wait disabled:opacity-60"
           disabled={isGeneratingGoal}
           onClick={() => void onGenerateNewGoal()}
           type="button"
@@ -1089,37 +1400,43 @@ function GoalSidePanel({
 
 function DpoChoiceModal({
   choice,
-  onSelect
+  onSelect,
+  onSkip
 }: {
   choice: PendingDpoChoice;
   onSelect: (output: ElementToken) => void;
+  onSkip: () => void;
 }) {
   return (
-    <div className="fixed inset-0 z-[2147483647] grid place-items-center bg-zinc-950/45 px-4 backdrop-blur-sm">
-      <div className="w-full max-w-xl rounded-md border border-zinc-200 bg-white p-5 text-zinc-950 shadow-2xl">
+    <div className="fixed inset-0 z-[2147483647] grid place-items-center overflow-y-auto bg-ink/45 px-4 py-6 backdrop-blur-sm">
+      <div className="my-auto max-h-[calc(100dvh-3rem)] w-full max-w-xl overflow-y-auto rounded-md border border-linen bg-surface p-5 text-ink shadow-lift">
         <div>
-          <p className="text-sm font-semibold text-zinc-500">DPO test mode</p>
-          <h2 className="mt-1 text-2xl font-black tracking-normal">
+          <p className="font-mono text-xs font-semibold uppercase tracking-wider text-cobalt">
+            Help train the AI
+          </p>
+          <h2 className="mt-1 font-display text-2xl font-black tracking-normal">
             Choose the best result
           </h2>
-          <p className="mt-2 text-sm text-zinc-600">
-            {choice.firstInput.name} + {choice.secondInput.name}
+          <p className="mt-2 text-sm text-soot">
+            {choice.firstInput.name} + {choice.secondInput.name} — your pick
+            teaches the model which results people prefer.
           </p>
         </div>
 
         <div className="mt-5 grid gap-2">
           {choice.candidates.map((candidate) => (
             <button
-              className="flex min-h-16 items-center justify-between gap-3 rounded-md border border-zinc-200 bg-zinc-50 px-4 py-3 text-left transition hover:border-zinc-400 hover:bg-white disabled:cursor-wait disabled:opacity-60"
+              className="element-card flex min-h-16 items-center justify-between gap-3 rounded-md border px-4 py-3 text-left transition hover:shadow-lift disabled:cursor-wait disabled:opacity-60"
               disabled={choice.isSaving}
               key={candidate.id}
               onClick={() => onSelect(candidate)}
+              style={{ "--el-hue": getHueForConcept(candidate.name) } as CSSProperties}
               type="button"
             >
               <span className="truncate text-lg font-semibold capitalize">
                 {candidate.name}
               </span>
-              <span className="text-sm text-zinc-500">Select</span>
+              <span className="text-sm font-medium text-cobalt">Select</span>
             </button>
           ))}
         </div>
@@ -1129,6 +1446,15 @@ function DpoChoiceModal({
             {choice.errorMessage}
           </p>
         ) : null}
+
+        <button
+          className="mt-4 h-9 w-full rounded-md border border-linen bg-surface text-sm font-medium text-soot transition hover:bg-paper hover:text-ink disabled:cursor-wait disabled:opacity-60"
+          disabled={choice.isSaving}
+          onClick={onSkip}
+          type="button"
+        >
+          Skip
+        </button>
       </div>
     </div>
   );
@@ -1137,13 +1463,13 @@ function DpoChoiceModal({
 function LeaderboardPreview({ entries }: { entries: LeaderboardEntry[] }) {
   return (
     <div>
-      <div className="flex items-center gap-2 text-xs font-semibold text-zinc-500 dark:text-zinc-400">
+      <div className="flex items-center gap-2 font-mono text-xs font-semibold uppercase tracking-wider text-soot dark:text-zinc-400">
         <Trophy size={13} />
         Leaderboard
       </div>
       <div className="mt-2 grid gap-1">
         {entries.length === 0 ? (
-          <p className="text-xs text-zinc-500 dark:text-zinc-400">
+          <p className="text-xs text-soot dark:text-zinc-400">
             No completed runs yet.
           </p>
         ) : (
@@ -1155,7 +1481,7 @@ function LeaderboardPreview({ entries }: { entries: LeaderboardEntry[] }) {
               <span className="truncate">
                 {index + 1}. {entry.displayName}
               </span>
-              <span className="shrink-0 font-semibold">
+              <span className="shrink-0 font-mono font-semibold">
                 {entry.combinationsUsed}
               </span>
             </div>
@@ -1187,33 +1513,35 @@ function GoalCelebration({
       : null;
 
   return (
-    <div className="fixed inset-0 z-[2147483647] grid place-items-center bg-zinc-950/45 px-4 backdrop-blur-sm">
-      <div className="w-full max-w-lg rounded-md border border-emerald-200 bg-white p-5 text-zinc-950 shadow-2xl">
+    <div className="fixed inset-0 z-[2147483647] grid place-items-center overflow-y-auto bg-ink/45 px-4 py-6 backdrop-blur-sm">
+      <div className="my-auto max-h-[calc(100dvh-3rem)] w-full max-w-lg overflow-y-auto rounded-md border border-linen bg-surface p-5 text-ink shadow-lift">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <p className="text-sm font-semibold text-emerald-700">Goal complete</p>
-            <h2 className="mt-1 text-3xl font-black tracking-normal">
+            <p className="font-mono text-xs font-semibold uppercase tracking-wider text-cobalt">
+              Goal complete
+            </p>
+            <h2 className="mt-1 font-display text-3xl font-black tracking-normal">
               {target.emoji ?? "🎯"} {target.name}
             </h2>
           </div>
-          <div className="grid size-14 place-items-center rounded-md border border-emerald-200 bg-emerald-50 text-3xl">
+          <div className="grid size-14 place-items-center rounded-md border border-linen bg-paper text-3xl">
             🏁
           </div>
         </div>
 
         <div className="mt-5 grid grid-cols-2 gap-3">
-          <div className="rounded-md border border-zinc-200 bg-zinc-50 p-3">
-            <p className="text-2xl font-semibold">{completion.combinationsUsed}</p>
-            <p className="mt-1 text-xs text-zinc-500">Combinations used</p>
+          <div className="rounded-md border border-linen bg-paper p-3">
+            <p className="font-mono text-2xl font-semibold">{completion.combinationsUsed}</p>
+            <p className="mt-1 text-xs text-soot">Combinations used</p>
           </div>
-          <div className="rounded-md border border-zinc-200 bg-zinc-50 p-3">
-            <p className="text-2xl font-semibold">{rank ? `#${rank}` : "..."}</p>
-            <p className="mt-1 text-xs text-zinc-500">Leaderboard rank</p>
+          <div className="rounded-md border border-linen bg-paper p-3">
+            <p className="font-mono text-2xl font-semibold">{rank ? `#${rank}` : "..."}</p>
+            <p className="mt-1 text-xs text-soot">Leaderboard rank</p>
           </div>
         </div>
 
         {completion.isSaving ? (
-          <p className="mt-4 rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-600">
+          <p className="mt-4 rounded-md border border-linen bg-paper px-3 py-2 text-sm text-soot">
             Saving leaderboard entry.
           </p>
         ) : null}
@@ -1230,7 +1558,7 @@ function GoalCelebration({
           </div>
           <div className="mt-3 grid gap-2">
             {leaderboard.length === 0 ? (
-              <p className="rounded-md border border-dashed border-zinc-200 p-3 text-sm text-zinc-500">
+              <p className="rounded-md border border-dashed border-linen p-3 text-sm text-soot">
                 No completed runs yet.
               </p>
             ) : (
@@ -1238,15 +1566,15 @@ function GoalCelebration({
                 <div
                   className={`flex items-center justify-between gap-3 rounded-md border px-3 py-2 text-sm ${
                     entry.userId === userId
-                      ? "border-emerald-300 bg-emerald-50"
-                      : "border-zinc-200 bg-zinc-50"
+                      ? "border-cobalt bg-cobalt/5"
+                      : "border-linen bg-paper"
                   }`}
                   key={entry.id}
                 >
                   <span className="truncate">
                     {index + 1}. {entry.displayName}
                   </span>
-                  <span className="font-semibold">
+                  <span className="font-mono font-semibold">
                     {entry.combinationsUsed} combos
                   </span>
                 </div>
@@ -1257,14 +1585,14 @@ function GoalCelebration({
 
         <div className="mt-5 grid gap-2 sm:grid-cols-2">
           <button
-            className="h-10 rounded-md border border-zinc-200 bg-white px-3 text-sm font-semibold transition hover:bg-zinc-50"
+            className="h-10 rounded-md border border-linen bg-surface px-3 text-sm font-semibold transition hover:bg-paper"
             onClick={onReset}
             type="button"
           >
             Try again
           </button>
           <button
-            className="h-10 rounded-md bg-zinc-950 px-3 text-sm font-semibold text-white transition hover:bg-zinc-800"
+            className="h-10 rounded-md bg-cobalt px-3 text-sm font-semibold text-white transition hover:bg-cobalt-deep"
             onClick={onBackToMenu}
             type="button"
           >
@@ -1276,25 +1604,70 @@ function GoalCelebration({
   );
 }
 
+function GoalBanner({
+  combinationsUsed,
+  isComplete,
+  par,
+  target
+}: {
+  combinationsUsed: number;
+  isComplete: boolean;
+  par: number;
+  target: ElementToken;
+}) {
+  return (
+    <div className="pointer-events-none absolute left-1/2 top-[4.75rem] z-20 max-w-[calc(100%-2rem)] -translate-x-1/2 md:top-4">
+      <div className="flex items-center gap-2.5 rounded-md border border-linen bg-surface/95 px-3 py-2 shadow-hairline backdrop-blur dark:border-zinc-700 dark:bg-zinc-950/85">
+        <Target className="shrink-0 text-cobalt" size={14} />
+        <span className="font-mono text-xs font-semibold uppercase tracking-wider text-soot dark:text-zinc-400">
+          Craft
+        </span>
+        <span
+          className="element-card flex items-center gap-1.5 rounded-md border px-2 py-1 text-sm font-semibold capitalize"
+          style={{ "--el-hue": getHueForConcept(target.name) } as CSSProperties}
+        >
+          <span>{target.emoji ?? "·"}</span>
+          <span className="max-w-36 truncate">{target.name}</span>
+        </span>
+        <span className="shrink-0 font-mono text-xs text-soot dark:text-zinc-400">
+          {isComplete
+            ? `done in ${combinationsUsed}`
+            : `${combinationsUsed} used · doable in ${par}`}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 const BlackHoleDropZone = forwardRef<
   HTMLDivElement,
-  { isActive: boolean }
->(function BlackHoleDropZone({ isActive }, ref) {
+  { isActive: boolean; isHot: boolean }
+>(function BlackHoleDropZone({ isActive, isHot }, ref) {
   return (
     <div
-      aria-label="Delete"
-      className={`absolute bottom-5 right-5 z-[2147483647] grid size-32 place-items-center rounded-full transition duration-200 sm:size-36 ${
-        isActive ? "scale-105 opacity-100" : "scale-100 opacity-80"
+      aria-label="Drop here to delete"
+      className={`pointer-events-none absolute bottom-5 right-5 z-[2147483647] grid size-32 place-items-center rounded-full transition-all duration-300 ease-out sm:size-36 ${
+        isActive
+          ? isHot
+            ? "scale-110 opacity-100"
+            : "scale-100 opacity-95"
+          : "scale-50 opacity-0"
       }`}
       ref={ref}
       style={{
         background:
-          "radial-gradient(circle at center, #020617 0 34%, #111827 35% 46%, #4c1d95 48% 55%, rgba(20,184,166,0.5) 56% 61%, transparent 62%)",
-        boxShadow:
-          "0 0 28px rgba(20,184,166,0.35), 0 0 46px rgba(124,58,237,0.35)"
+          "radial-gradient(circle at center, #0b0a08 0 34%, #26221b 35% 46%, rgba(43,75,223,0.55) 48% 55%, rgba(43,75,223,0.28) 56% 61%, transparent 62%)",
+        boxShadow: isHot
+          ? "0 0 40px rgba(43,75,223,0.55), 0 0 70px rgba(43,75,223,0.3)"
+          : "0 0 24px rgba(43,75,223,0.3), 0 0 42px rgba(38,34,27,0.25)"
       }}
-      title="Delete"
+      title="Drop here to delete"
     >
+      <div
+        className={`blackhole-ring absolute inset-3 rounded-full border-2 border-cobalt/30 transition-colors duration-300 ${
+          isHot ? "border-t-white" : "border-t-cobalt"
+        }`}
+      />
       <div className="size-14 rounded-full bg-black shadow-[inset_0_0_18px_rgba(255,255,255,0.08)] sm:size-16" />
     </div>
   );
@@ -1304,7 +1677,7 @@ function SweepAnimation({ target }: { target: Point }) {
   return (
     <div className="pointer-events-none absolute inset-0 z-[2147483000] overflow-hidden">
       <div
-        className="sweep-dust absolute h-20 w-20 rounded-full bg-teal-300/30 blur-2xl"
+        className="sweep-dust absolute h-20 w-20 rounded-full bg-cobalt/25 blur-2xl"
         style={{
           left: target.x - 40,
           top: target.y - 40
@@ -1319,10 +1692,12 @@ function BoardToken({
   isCombining,
   isDragging,
   isSweeping,
+  onPointerCancel,
   onPointerDown,
   onPointerMove,
   onPointerUp,
-  sweepTarget
+  sweepTarget,
+  vanishTarget
 }: {
   element: BoardElement;
   isCombining: boolean;
@@ -1332,42 +1707,58 @@ function BoardToken({
     event: PointerEvent<HTMLButtonElement>,
     element: BoardElement
   ) => void;
+  onPointerCancel: () => void;
   onPointerMove: (event: PointerEvent<HTMLButtonElement>) => void;
   onPointerUp: (event: PointerEvent<HTMLButtonElement>) => void;
   sweepTarget: Point | null;
+  vanishTarget: Point | null;
 }) {
+  const vanishTransform = vanishTarget
+    ? `translate(${vanishTarget.x - element.x - TOKEN_WIDTH / 2}px, ${
+        vanishTarget.y - element.y - TOKEN_HEIGHT / 2
+      }px) scale(0.1) rotate(120deg)`
+    : undefined;
   const sweepTransform =
     isSweeping && sweepTarget
       ? `translate(${sweepTarget.x - element.x - TOKEN_WIDTH / 2}px, ${
           sweepTarget.y - element.y - TOKEN_HEIGHT / 2
         }px) scale(0.35)`
       : undefined;
+  const [isFreshSpawn] = useState(() => {
+    const spawnTimestamp = Number(element.instanceId.split(":")[1]);
+
+    return Number.isFinite(spawnTimestamp) && Date.now() - spawnTimestamp < 1000;
+  });
 
   return (
     <button
-      className={`absolute flex h-12 w-[132px] touch-none select-none items-center gap-2 rounded-md border bg-white px-3 text-left shadow-sm transition-shadow hover:shadow-md dark:bg-zinc-900 ${
-        isDragging
-          ? "border-zinc-950 opacity-90 shadow-lg dark:border-zinc-100"
-          : "border-zinc-200 dark:border-zinc-700"
+      className={`element-card absolute flex h-12 w-[132px] touch-none select-none items-center gap-2 rounded-md border px-3 text-left shadow-sm transition-shadow hover:shadow-md ${
+        isDragging ? "opacity-90 shadow-lg ring-2 ring-cobalt dark:ring-zinc-100" : ""
       } ${
         isCombining || isSweeping
           ? "cursor-wait"
           : "cursor-grab active:cursor-grabbing"
-      } ${isSweeping ? "board-token-sweeping" : ""}`}
+      } ${isSweeping ? "board-token-sweeping" : ""} ${
+        vanishTarget ? "board-token-vanishing" : ""
+      } ${isFreshSpawn && !vanishTarget ? "element-pop" : ""}`}
       data-board-token-id={element.instanceId}
-      disabled={isCombining || isSweeping}
+      disabled={isCombining || isSweeping || vanishTarget !== null}
+      onPointerCancel={onPointerCancel}
       onPointerDown={(event) => onPointerDown(event, element)}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
-      style={{
-        left: element.x,
-        top: element.y,
-        transform: sweepTransform,
-        zIndex: element.zIndex
-      }}
+      style={
+        {
+          left: element.x,
+          top: element.y,
+          transform: vanishTransform ?? sweepTransform,
+          zIndex: element.zIndex,
+          "--el-hue": getHueForConcept(element.name)
+        } as CSSProperties
+      }
       type="button"
     >
-      <span className="grid size-8 shrink-0 place-items-center rounded border border-zinc-200 bg-zinc-50 text-lg dark:border-zinc-700 dark:bg-zinc-800">
+      <span className="grid size-8 shrink-0 place-items-center rounded border border-linen bg-surface/70 text-lg dark:border-zinc-700 dark:bg-zinc-950/40">
         {element.emoji ?? "·"}
       </span>
       <span className="min-w-0 truncate text-sm font-medium capitalize">
@@ -1379,11 +1770,13 @@ function BoardToken({
 
 function InventoryToken({
   element,
+  onPointerCancel,
   onPointerDown,
   onPointerMove,
   onPointerUp
 }: {
   element: ElementToken;
+  onPointerCancel: () => void;
   onPointerDown: (
     event: PointerEvent<HTMLButtonElement>,
     element: ElementToken
@@ -1393,30 +1786,61 @@ function InventoryToken({
 }) {
   return (
     <button
-      className="flex min-h-16 touch-none select-none flex-col items-center justify-center rounded-md border border-zinc-200 bg-zinc-50 px-2 py-2 text-center transition hover:border-zinc-300 hover:bg-white active:cursor-grabbing dark:border-zinc-700 dark:bg-zinc-900 dark:hover:border-zinc-600 dark:hover:bg-zinc-800"
+      className="element-card flex min-h-16 cursor-grab touch-none select-none flex-col items-center justify-center rounded-md border px-2 py-2 text-center transition hover:shadow-lift active:cursor-grabbing"
+      onPointerCancel={onPointerCancel}
       onPointerDown={(event) => onPointerDown(event, element)}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
+      style={{ "--el-hue": getHueForConcept(element.name) } as CSSProperties}
       type="button"
     >
       <span className="text-2xl">{element.emoji ?? "·"}</span>
-      <span className="mt-1 w-full truncate text-xs font-medium capitalize text-zinc-700 dark:text-zinc-200">
+      <span className="mt-1 line-clamp-2 w-full break-words text-xs font-medium capitalize leading-tight text-ink dark:text-zinc-200">
         {element.name}
       </span>
     </button>
   );
 }
 
-function DragPreview({ dragState }: { dragState: DragState }) {
+function DragPreview({
+  dragState,
+  pointerRef
+}: {
+  dragState: DragState;
+  pointerRef: { current: Point | null };
+}) {
+  const nodeRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    let frame = requestAnimationFrame(function follow() {
+      const point = pointerRef.current;
+
+      if (nodeRef.current && point) {
+        nodeRef.current.style.transform = `translate(${
+          point.x - dragState.offsetX
+        }px, ${point.y - dragState.offsetY}px)`;
+      }
+
+      frame = requestAnimationFrame(follow);
+    });
+
+    return () => cancelAnimationFrame(frame);
+  }, [dragState.offsetX, dragState.offsetY, pointerRef]);
+
   return (
     <div
-      className="pointer-events-none fixed z-50 flex h-12 w-[132px] items-center gap-2 rounded-md border border-zinc-950 bg-white px-3 text-left opacity-90 shadow-lg dark:border-zinc-100 dark:bg-zinc-900"
-      style={{
-        left: dragState.pointerX - dragState.offsetX,
-        top: dragState.pointerY - dragState.offsetY
-      }}
+      className="element-card pointer-events-none fixed left-0 top-0 z-50 flex h-12 w-[132px] items-center gap-2 rounded-md border px-3 text-left opacity-90 shadow-lg ring-2 ring-cobalt dark:ring-zinc-100"
+      ref={nodeRef}
+      style={
+        {
+          transform: `translate(${dragState.pointerX - dragState.offsetX}px, ${
+            dragState.pointerY - dragState.offsetY
+          }px)`,
+          "--el-hue": getHueForConcept(dragState.element.name)
+        } as CSSProperties
+      }
     >
-      <span className="grid size-8 shrink-0 place-items-center rounded border border-zinc-200 bg-zinc-50 text-lg dark:border-zinc-700 dark:bg-zinc-800">
+      <span className="grid size-8 shrink-0 place-items-center rounded border border-linen bg-surface/70 text-lg dark:border-zinc-700 dark:bg-zinc-950/40">
         {dragState.element.emoji ?? "·"}
       </span>
       <span className="min-w-0 truncate text-sm font-medium capitalize">
@@ -1443,14 +1867,14 @@ function StatusToast({
 
   return (
     <div
-      className={`absolute left-4 z-40 max-w-[calc(100%-2rem)] rounded-md border border-zinc-200 bg-white/95 px-4 py-3 shadow-hairline backdrop-blur dark:border-zinc-700 dark:bg-zinc-950/90 sm:max-w-sm ${
+      className={`absolute left-4 z-40 max-w-[calc(100%-2rem)] rounded-md border border-linen bg-surface/95 px-4 py-3 shadow-hairline backdrop-blur dark:border-zinc-700 dark:bg-zinc-950/90 sm:max-w-sm ${
         isGoalMode ? "bottom-32" : "bottom-4"
       }`}
     >
       {errorMessage ? (
-        <p className="text-sm text-zinc-600 dark:text-zinc-300">{errorMessage}</p>
+        <p className="text-sm text-soot dark:text-zinc-300">{errorMessage}</p>
       ) : isCombining ? (
-        <p className="text-sm text-zinc-600 dark:text-zinc-300">
+        <p className="text-sm text-soot dark:text-zinc-300">
           Resolving combination.
         </p>
       ) : result ? (
@@ -1461,17 +1885,17 @@ function StatusToast({
               {result.result.name}
             </span>
           </div>
-          <div className="mt-2 flex flex-wrap gap-2 text-xs text-zinc-500 dark:text-zinc-400">
-            <span className="rounded border border-zinc-200 bg-zinc-50 px-2 py-1 dark:border-zinc-700 dark:bg-zinc-900">
+          <div className="mt-2 flex flex-wrap gap-2 font-mono text-xs text-soot dark:text-zinc-400">
+            <span className="rounded border border-linen bg-paper px-2 py-1 dark:border-zinc-700 dark:bg-zinc-900">
               {formatCombineSource(result.source)}
             </span>
             {typeof result.confidence === "number" ? (
-              <span className="rounded border border-zinc-200 bg-zinc-50 px-2 py-1 dark:border-zinc-700 dark:bg-zinc-900">
+              <span className="rounded border border-linen bg-paper px-2 py-1 dark:border-zinc-700 dark:bg-zinc-900">
                 {Math.round(result.confidence * 100)}%
               </span>
             ) : null}
             {result.source === "model_generated" && result.model ? (
-              <span className="rounded border border-zinc-200 bg-zinc-50 px-2 py-1 dark:border-zinc-700 dark:bg-zinc-900">
+              <span className="rounded border border-linen bg-paper px-2 py-1 dark:border-zinc-700 dark:bg-zinc-900">
                 {getCombinerModelLabel(result.model)}
               </span>
             ) : null}
@@ -1484,8 +1908,8 @@ function StatusToast({
 
 function RecipeCard({ item }: { item: RecipeHistoryItem }) {
   return (
-    <div className="rounded-md border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-700 dark:bg-zinc-900">
-      <div className="flex flex-wrap items-center gap-1 text-xs text-zinc-500 dark:text-zinc-400">
+    <div className="rounded-md border border-linen bg-paper p-3 dark:border-zinc-700 dark:bg-zinc-900">
+      <div className="flex flex-wrap items-center gap-1 text-xs text-soot dark:text-zinc-400">
         <span>{formatElementName(item.inputA)}</span>
         <span>+</span>
         <span>{formatElementName(item.inputB)}</span>
@@ -1494,7 +1918,7 @@ function RecipeCard({ item }: { item: RecipeHistoryItem }) {
         <span className="truncate text-sm font-medium capitalize">
           {formatElementName(item.output)}
         </span>
-        <span className="rounded border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-500 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-400">
+        <span className="rounded border border-linen bg-surface px-2 py-1 font-mono text-xs text-soot dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-400">
           {formatCombineSource(item.source)}
         </span>
       </div>

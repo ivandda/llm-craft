@@ -1,3 +1,13 @@
+> ⚠️ **Documento histórico — ANTEPROYECTO (propuesta inicial).** Describe el plan
+> original, no lo que finalmente se implementó. Varias piezas propuestas aquí **no se
+> ejecutaron o cambiaron**: el dataset final **no tiene** `near_negatives`/`easy_negatives`
+> ni `preference_pairs` (solo candidatos válidos `observed`/`teacher`); DPO se hizo
+> **on-policy** (chosen = canónico corto, rejected = la propia salida verbosa/inválida del
+> modelo, seleccionados por reglas), **no** con negativos del teacher; y **no** se
+> implementaron RAG (M5), evaluación *goal-directed*, evaluación humana ni el *Teacher
+> Fidelity Score* (TFS). El informe fiel a lo realizado es **`informe/latex/acl_latex.tex`**
+> y `docs/resultados.md`. Ver correcciones en `docs/informe/correcciones_informe.md`.
+
 # Destilación y evaluación de creatividad composicional en LLMs pequeños
 
 **Santino Galliano**  

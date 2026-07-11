@@ -12,10 +12,16 @@ export function selectDpoCandidates(
     return [];
   }
 
-  return shuffleOutputs(uniqueOutputs, random).slice(
-    0,
-    Math.min(MAX_DPO_OPTIONS, uniqueOutputs.length)
-  );
+  // Always keep the canonical (rank-1) output among the choices: goal-mode
+  // paths are computed from rank-1 recipes, so hiding it could make a goal
+  // unreachable in the promised number of combinations.
+  const [topOutput, ...alternatives] = uniqueOutputs;
+  const shownOutputs = [
+    topOutput,
+    ...shuffleOutputs(alternatives, random).slice(0, MAX_DPO_OPTIONS - 1)
+  ];
+
+  return shuffleOutputs(shownOutputs, random);
 }
 
 function dedupeOutputs(outputs: ElementToken[]): ElementToken[] {
