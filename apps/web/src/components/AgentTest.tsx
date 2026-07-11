@@ -1,15 +1,17 @@
 "use client";
 
-import { requestAgentRankings, requestArenaFeed } from "@/lib/api";
+import { requestArenaFeed, requestArenaStats } from "@/lib/api";
 import { getAgentModelLabel } from "@/lib/agentModels";
 import { buildAgentPlaybackInventory } from "@/lib/agentPlayback";
 import { getHueForConcept } from "@/lib/emoji";
+import { ArenaCharts } from "@/components/ArenaCharts";
 import { BackButton } from "@/components/BackButton";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import type {
   AgentRankingEntry,
   AgentRunSummary,
   AgentTestReport,
+  ArenaStats,
   AuthUser,
   GoalPreset
 } from "@/lib/types";
@@ -41,6 +43,26 @@ const PLAYBACK_SPEEDS = [
 const FEED_REFRESH_MS = 30_000;
 const PODIUM_MEDALS = ["🥇", "🥈", "🥉"];
 
+/** Arena days follow the UTC calendar, matching the daily goal seed. */
+function currentUtcDay(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function formatDayLabel(day: string): string {
+  const parsed = new Date(`${day}T00:00:00Z`);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return day;
+  }
+
+  return parsed.toLocaleDateString("en-US", {
+    day: "numeric",
+    month: "short",
+    timeZone: "UTC",
+    year: "numeric"
+  });
+}
+
 export function AgentTest({
   goalDepth,
   user,
@@ -56,13 +78,20 @@ export function AgentTest({
 }) {
   const [goal, setGoal] = useState<GoalPreset | null>(null);
   const [runs, setRuns] = useState<AgentRunSummary[]>([]);
-  const [rankings, setRankings] = useState<AgentRankingEntry[]>([]);
+  const [stats, setStats] = useState<ArenaStats | null>(null);
+  const [selectedDay, setSelectedDay] = useState<string>(currentUtcDay);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [isLoadingFeed, setIsLoadingFeed] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [playbackIndex, setPlaybackIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackSpeedMs, setPlaybackSpeedMs] = useState(900);
+
+  const today = currentUtcDay();
+  const dayOptions = useMemo(() => {
+    const days = new Set<string>([today, ...(stats?.days ?? [])]);
+    return [...days].sort().reverse();
+  }, [stats, today]);
 
   const selectedRun = runs.find((run) => run.id === selectedRunId) ?? null;
   const report = selectedRun?.report ?? null;
@@ -90,9 +119,9 @@ export function AgentTest({
       }
 
       try {
-        const [feed, rankingEntries] = await Promise.all([
-          requestArenaFeed(goalDepth),
-          requestAgentRankings(goalDepth)
+        const [feed, statsPayload] = await Promise.all([
+          requestArenaFeed(goalDepth, selectedDay),
+          requestArenaStats(goalDepth)
         ]);
 
         if (cancelled) {
@@ -101,7 +130,7 @@ export function AgentTest({
 
         setGoal(feed.goal);
         setRuns(feed.runs);
-        setRankings(rankingEntries);
+        setStats(statsPayload);
         setErrorMessage(null);
       } catch {
         if (!cancelled) {
@@ -121,7 +150,7 @@ export function AgentTest({
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [goalDepth]);
+  }, [goalDepth, selectedDay]);
 
   useEffect(() => {
     if (!report || !isPlaying || playbackIndex >= report.steps.length) {
@@ -153,7 +182,15 @@ export function AgentTest({
     setSelectedRunId(null);
     setIsPlaying(false);
     setPlaybackIndex(0);
+    setSelectedDay(currentUtcDay());
     onGoalDepthChange(depth);
+  }
+
+  function changeDay(day: string) {
+    setSelectedRunId(null);
+    setIsPlaying(false);
+    setPlaybackIndex(0);
+    setSelectedDay(day);
   }
 
   function restartPlayback() {
@@ -194,8 +231,8 @@ export function AgentTest({
               LLM Arena
             </h1>
             <p className="mt-1 text-sm text-soot">
-              Each model faces the same daily crafting goal. Watch how they
-              reason their way to it — or fail trying.
+              Each model faces the same daily crafting goal. Replay any day,
+              watch how they reason — and see who wins over time.
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -209,23 +246,39 @@ export function AgentTest({
 
         <section className="grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
           <aside className="rounded-md border border-linen bg-surface p-5 shadow-hairline">
-            <label className="grid gap-2 text-sm font-semibold text-ink">
-              <span>Goal depth</span>
-              <select
-                className="h-10 rounded-md border border-linen bg-surface px-3 text-sm outline-none transition focus:border-cobalt"
-                onChange={(event) => changeGoalDepth(Number(event.target.value))}
-                value={goalDepth}
-              >
-                {Array.from({ length: 10 }, (_, index) => index + 1).map((value) => (
-                  <option key={value} value={value}>
-                    {value}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <div className="grid grid-cols-2 gap-3">
+              <label className="grid gap-2 text-sm font-semibold text-ink">
+                <span>Goal depth</span>
+                <select
+                  className="h-10 rounded-md border border-linen bg-surface px-3 text-sm outline-none transition focus:border-cobalt"
+                  onChange={(event) => changeGoalDepth(Number(event.target.value))}
+                  value={goalDepth}
+                >
+                  {Array.from({ length: 10 }, (_, index) => index + 1).map((value) => (
+                    <option key={value} value={value}>
+                      {value}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="grid gap-2 text-sm font-semibold text-ink">
+                <span>Day</span>
+                <select
+                  className="h-10 rounded-md border border-linen bg-surface px-3 text-sm outline-none transition focus:border-cobalt"
+                  onChange={(event) => changeDay(event.target.value)}
+                  value={selectedDay}
+                >
+                  {dayOptions.map((day) => (
+                    <option key={day} value={day}>
+                      {day === today ? "Today" : formatDayLabel(day)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
 
-            <TodaysChallenge goal={goal} />
-            <Podium entries={rankings} />
+            <DayChallenge day={selectedDay} goal={goal} isToday={selectedDay === today} />
+            <Podium entries={stats?.rankings ?? []} />
 
             <p className="mt-4 rounded-md border border-linen bg-paper px-3 py-2 text-xs text-soot">
               Runs are triggered by the admins to keep model costs in check —
@@ -255,6 +308,7 @@ export function AgentTest({
 
           <section className="min-h-[520px] rounded-md border border-linen bg-surface p-5 shadow-hairline">
             <RecentRuns
+              dayLabel={selectedDay === today ? "today" : formatDayLabel(selectedDay)}
               isLoading={isLoadingFeed}
               runs={runs}
               selectedRunId={selectedRunId}
@@ -289,17 +343,34 @@ export function AgentTest({
             )}
           </section>
         </section>
+
+        {stats ? (
+          <ArenaCharts
+            daily={stats.daily}
+            depth={goalDepth}
+            overall={stats.overall}
+            rankings={stats.rankings}
+          />
+        ) : null}
       </div>
     </main>
   );
 }
 
-function TodaysChallenge({ goal }: { goal: GoalPreset | null }) {
+function DayChallenge({
+  day,
+  goal,
+  isToday
+}: {
+  day: string;
+  goal: GoalPreset | null;
+  isToday: boolean;
+}) {
   return (
     <div className="mt-5 rounded-md border border-linen bg-paper p-3">
       <p className="flex items-center gap-1.5 font-mono text-xs font-semibold uppercase tracking-wider text-soot">
         <Target size={13} />
-        Today&apos;s challenge
+        {isToday ? "Today's challenge" : `Challenge · ${formatDayLabel(day)}`}
       </p>
       {goal ? (
         <>
@@ -309,11 +380,15 @@ function TodaysChallenge({ goal }: { goal: GoalPreset | null }) {
           <p className="mt-2 text-xs text-soot">
             Doable in {goal.metadata.minDepth ?? goal.metadata.depth} steps ·
             starting from {goal.initialInventory.length} elements · same goal
-            for every model today.
+            for every model {isToday ? "today" : "that day"}.
           </p>
         </>
       ) : (
-        <p className="mt-2 text-xs text-soot">Loading…</p>
+        <p className="mt-2 text-xs text-soot">
+          {isToday
+            ? "Loading…"
+            : "No recorded challenge for this day at this depth."}
+        </p>
       )}
     </div>
   );
@@ -323,7 +398,7 @@ function Podium({ entries }: { entries: AgentRankingEntry[] }) {
   return (
     <div className="mt-4 rounded-md border border-linen bg-paper p-3">
       <p className="font-mono text-xs font-semibold uppercase tracking-wider text-soot">
-        Ranking · this depth
+        Ranking · this depth · all days
       </p>
       {entries.length === 0 ? (
         <p className="mt-2 text-xs text-soot">
@@ -333,24 +408,26 @@ function Podium({ entries }: { entries: AgentRankingEntry[] }) {
         <div className="mt-2 grid gap-2">
           {entries.map((entry, index) => (
             <div
-              className="flex items-center justify-between gap-2 rounded-md border border-linen bg-surface px-2.5 py-2"
+              className="rounded-md border border-linen bg-surface px-2.5 py-2"
               key={entry.model}
             >
-              <span className="flex min-w-0 items-center gap-2 text-sm">
-                <span aria-hidden>{PODIUM_MEDALS[index] ?? "·"}</span>
-                <span className="truncate font-medium">
-                  {getAgentModelLabel(entry.model)}
+              <div className="flex items-center justify-between gap-2">
+                <span className="flex min-w-0 items-center gap-2 text-sm">
+                  <span aria-hidden>{PODIUM_MEDALS[index] ?? "·"}</span>
+                  <span className="truncate font-medium">
+                    {getAgentModelLabel(entry.model)}
+                  </span>
                 </span>
-              </span>
-              <span className="shrink-0 text-right font-mono text-xs text-soot">
-                <span className="block text-sm font-semibold text-ink">
+                <span className="shrink-0 font-mono text-sm font-semibold">
                   {Math.round(entry.winRate * 100)}%
                 </span>
+              </div>
+              <p className="mt-0.5 font-mono text-xs text-soot">
                 {entry.wins}/{entry.runs} wins
                 {entry.avgCombinations !== null
-                  ? ` · ${entry.avgCombinations.toFixed(1)} avg`
+                  ? ` · ${entry.avgCombinations.toFixed(1)} moves/win`
                   : ""}
-              </span>
+              </p>
             </div>
           ))}
         </div>
@@ -360,11 +437,13 @@ function Podium({ entries }: { entries: AgentRankingEntry[] }) {
 }
 
 function RecentRuns({
+  dayLabel,
   isLoading,
   runs,
   selectedRunId,
   onSelect
 }: {
+  dayLabel: string;
   isLoading: boolean;
   runs: AgentRunSummary[];
   selectedRunId: string | null;
@@ -373,14 +452,14 @@ function RecentRuns({
   return (
     <div>
       <h3 className="font-mono text-xs font-semibold uppercase tracking-wider text-soot">
-        Recent runs
+        Runs · {dayLabel}
       </h3>
       {isLoading && runs.length === 0 ? (
         <p className="mt-3 text-sm text-soot">Loading runs…</p>
       ) : runs.length === 0 ? (
         <p className="mt-3 rounded-md border border-dashed border-linen p-3 text-sm text-soot">
-          No runs at this depth yet — check back after the next arena session,
-          or try another depth.
+          No runs at this depth {dayLabel === "today" ? "today" : `on ${dayLabel}`}{" "}
+          — pick another day above, or check back after the next arena session.
         </p>
       ) : (
         <div className="mt-3 flex flex-wrap gap-2">

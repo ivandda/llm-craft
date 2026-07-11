@@ -133,6 +133,38 @@ export type AgentRankingEntry = {
   avgCombinations: number | null;
 };
 
+export type ArenaDailyModelStat = {
+  /** UTC calendar day, YYYY-MM-DD — matches the daily goal seed. */
+  day: string;
+  model: string;
+  runs: number;
+  wins: number;
+  winRate: number;
+  /** Average combinations used, successful runs only. */
+  avgCombinations: number | null;
+};
+
+export type ArenaOverallEntry = {
+  model: string;
+  daysPlayed: number;
+  runs: number;
+  wins: number;
+  /** Mean of per-day win rates over the days the model actually ran. */
+  score: number;
+  avgCombinations: number | null;
+};
+
+export type ArenaStats = {
+  /** Days with runs at the requested depth, newest first. */
+  days: string[];
+  /** Per-day, per-model stats at the requested depth. */
+  daily: ArenaDailyModelStat[];
+  /** Cross-depth leaderboard, per-day-averaged so sparse days weigh equally. */
+  overall: ArenaOverallEntry[];
+  /** All-time ranking at the requested depth. */
+  rankings: AgentRankingEntry[];
+};
+
 export type DpoCandidate = ElementToken & {
   generatedBy?: string;
 };

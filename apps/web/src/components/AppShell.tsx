@@ -495,10 +495,10 @@ function ModeMenu({
             hue={152}
             compactPreview
             icon={<Bot size={22} />}
-            modeLabel={`Watch the model play toward a goal on its own — depth ${goalDepth}`}
+            modeLabel={`Watch LLMs race toward the daily goal and compare their results — depth ${goalDepth}`}
             previewElements={["🤖"]}
             resultElement="🤖"
-            label="Agent Run"
+            label="LLM Arena"
             onClick={() => onSelectMode("agent-test")}
           />
         </section>

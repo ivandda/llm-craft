@@ -47,7 +47,7 @@ La UI incluye tres modos:
 
 * `Sandbox`: inventario inicial amplio para explorar combinaciones.
 * `Goal`: genera una meta alcanzable desde recetas reales. El selector de profundidad controla cuantas combinaciones tiene el plan validado antes de llegar al objetivo. El inventario inicial se elige automaticamente desde presets curados de 2 a 4 elementos.
-* `Agent Test`: recibe la misma profundidad que `Goal`, genera una meta nueva con seed por corrida y ejecuta un agente con Vertex. El agente solo puede elegir pares del inventario; la app llama al combinador como tool y corta cuando alcanza el objetivo o usa 20 mezclas.
+* `LLM Arena` (modo interno `agent-test`): recibe la misma profundidad que `Goal`; cada dia hay una meta determinista por profundidad y un agente Vertex la juega. El agente solo puede elegir pares del inventario; la app llama al combinador como tool y corta cuando alcanza el objetivo o usa 20 mezclas.
 
 Dentro de `Goal`, el panel derecho permite reiniciar la meta actual o generar una nueva sin volver al menu principal. Generar una nueva meta reemplaza el objetivo, resetea inventario/tablero/historial y carga el leaderboard del nuevo `goalId`.
 
@@ -55,7 +55,7 @@ Dentro de `Goal`, el panel derecho permite reiniciar la meta actual o generar un
 
 El juego tambien incluye el toggle `Help train the AI` (captura de preferencias DPO), activado por defecto. Las rondas de preferencia son periodicas (combinaciones 3, 8, 13, ...): la UI pide candidatos a `POST /api/dpo/candidates`, que arma hasta 3 opciones "a ciegas" mezclando la salida canonica almacenada con generaciones en vivo de Qwen y Gemini (cada candidato lleva `generatedBy` en el evento guardado, pero la UI no muestra que modelo lo genero, para no sesgar). La opcion canonica siempre esta incluida (los goals se calculan con recetas rank-1). El jugador puede saltear con `Skip` (se usa la salida top y no se guarda preferencia). Los conceptos sin emoji reciben uno deterministico por nombre (`src/lib/emoji.ts`), que tambien define el tinte de color estable de cada ficha.
 
-`Agent Test` funciona como arena de LLMs: cada corrida se persiste en `agent_runs` (migracion `005`) y la UI muestra un ranking por profundidad (tasa de exito, combinaciones promedio). El seed de la meta es diario por profundidad, asi todos los modelos enfrentan la misma meta y el ranking es comparable. Las metas aleatorias ahora tambien incluyen recetas generadas por modelos (`web-generated-*`); ante el mismo par, `final-10k` tiene prioridad.
+`LLM Arena` funciona como arena de LLMs: cada corrida se persiste en `agent_runs` (migracion `005`) y la UI permite navegar por dia (hoy y dias anteriores, agrupados por fecha UTC — la misma que usa el seed diario) ademas de mostrar un ranking por profundidad (tasa de exito, combinaciones promedio) y graficos comparativos (win rate por modelo, tendencia diaria, movimientos por victoria). El score general cruza todas las profundidades y promedia el win rate por dia solo sobre los dias en que cada modelo corrio, para que un modelo ausente ciertos dias no quede penalizado ni favorecido. Las metas aleatorias ahora tambien incluyen recetas generadas por modelos (`web-generated-*`); ante el mismo par, `final-10k` tiene prioridad.
 
 Los cambios de perfil, logros destacados, leaderboard, preferencias DPO y recetas generadas se guardan en Postgres mediante endpoints tipados.
 
@@ -70,8 +70,8 @@ Los endpoints viven bajo `apps/web/app/api`:
 * `GET /api/auth/me`
 * `POST /api/combine`
 * `POST /api/goals/random`
-* `GET /api/agent-test/runs` (feed publico del arena: goal del dia + corridas recientes)
-* `GET /api/agent-test/rankings`
+* `GET /api/agent-test/runs?depth=N[&day=YYYY-MM-DD]` (feed publico del arena: goal y corridas del dia pedido; sin `day` usa hoy, para dias pasados el goal se recupera del reporte guardado)
+* `GET /api/agent-test/stats?depth=N` (dias con corridas, stats por dia/modelo a esa profundidad, leaderboard general entre profundidades y ranking por profundidad)
 * `POST /api/admin/arena/run` (solo admin: correr un modelo contra el goal del dia)
 * `POST /api/dpo/candidates`
 * `POST /api/dpo/preferences`
@@ -100,12 +100,12 @@ Para una prueba manual minima:
 5. Probar una combinacion no conocida para validar la generacion con Vertex y su persistencia.
 6. Cambiar entre `Sandbox` y `Goal`, elegir profundidad y revisar el leaderboard.
 7. En `Goal`, usar `Reset` para reiniciar la meta actual y `New goal` para generar otra meta desde cero.
-8. Entrar a `Agent Test`, elegir profundidad 2 y revisar que el limite del reporte sea 20.
+8. Entrar a `LLM Arena`, elegir profundidad 2 y revisar que el limite del reporte sea 20.
 9. Con `Help train the AI` activo (default), combinar un par con alternativas reales y elegir una salida.
 
 ## LLM Arena
 
-El modo `Agent Test` del frontend es un **arena de solo lectura**: muestra el desafio del dia (mismo goal determinista por profundidad para todos los modelos), un podio por win rate, y las corridas recientes con el camino paso a paso de cada modelo (reproducible con playback). Las corridas se disparan **solo desde `/admin`** (seccion "LLM Arena", boton que corre los modelos en secuencia contra el goal del dia) porque cada corrida consume llamadas reales al planner; los resultados quedan publicos en `agent_runs`.
+El modo `LLM Arena` del frontend (tab `LLM Arena`, modo interno `agent-test`) es un **arena de solo lectura**: muestra el desafio del dia seleccionado (mismo goal determinista por profundidad para todos los modelos; con el selector `Day` se puede volver a cualquier dia anterior con corridas), un podio por win rate, las corridas de ese dia con el camino paso a paso de cada modelo (reproducible con playback), y una seccion `Model comparison` con graficos Recharts: leaderboard general (todas las profundidades, score = promedio del win rate diario sobre los dias jugados por cada modelo, con dias y corridas visibles), tendencia de win rate por dia a la profundidad elegida, y promedio de movimientos por victoria. Las corridas se disparan **solo desde `/admin`** (seccion "LLM Arena", boton que corre los modelos en secuencia contra el goal del dia) porque cada corrida consume llamadas reales al planner; los resultados quedan publicos en `agent_runs`.
 
 ## Dashboard admin y deploy
 
