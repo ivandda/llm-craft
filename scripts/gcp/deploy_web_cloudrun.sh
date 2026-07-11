@@ -8,7 +8,12 @@
 #   QWEN_COMBINER_BASE_URL  e.g. http://<model-vm-ip>:8000/v1 (omit to run Gemini-only)
 #   QWEN_COMBINER_API_KEY   bearer token expected by the model VM
 #   VERTEX_MODEL            default gemini-2.5-flash
+#   ADMIN_DASH_USER / ADMIN_DASH_PASSWORD  enable the /admin GPU dashboard
+#   QWEN_VM_NAME / QWEN_VM_ZONE            VM targeted by /admin (defaults in app)
 #   REGION / SERVICE / PROJECT overrides
+#
+# Env vars are only (re)set by this script. The Cloud Build CI trigger
+# (cloudbuild.web.yaml) redeploys the image without touching env.
 set -euo pipefail
 
 PROJECT="${PROJECT:-nlp2026-498021}"
@@ -40,6 +45,15 @@ fi
 
 if [[ -n "${QWEN_COMBINER_API_KEY:-}" ]]; then
   ENV_VARS+="@QWEN_COMBINER_API_KEY=${QWEN_COMBINER_API_KEY}"
+fi
+
+if [[ -n "${ADMIN_DASH_USER:-}" && -n "${ADMIN_DASH_PASSWORD:-}" ]]; then
+  ENV_VARS+="@ADMIN_DASH_USER=${ADMIN_DASH_USER}"
+  ENV_VARS+="@ADMIN_DASH_PASSWORD=${ADMIN_DASH_PASSWORD}"
+  ENV_VARS+="@QWEN_VM_NAME=${QWEN_VM_NAME:-qwen-combiner-test}"
+  ENV_VARS+="@QWEN_VM_ZONE=${QWEN_VM_ZONE:-us-central1-a}"
+else
+  echo "NOTE: ADMIN_DASH_USER/ADMIN_DASH_PASSWORD not set; /admin dashboard will be disabled." >&2
 fi
 
 echo "==> Deploying ${SERVICE} to Cloud Run (${REGION})"
