@@ -1,12 +1,24 @@
+import { GUEST_USERNAME_PREFIX } from "@/lib/guests";
 import { createDefaultProfile } from "@/lib/profile";
 import { query, transaction } from "@/lib/server/db";
 import type { AuthUser, FeaturedAchievement, UserProfile } from "@/lib/types";
 import { createHash, randomBytes, timingSafeEqual } from "crypto";
 
 export const SESSION_COOKIE_NAME = "llm-craft.session";
+export const SESSION_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
 const SEEDED_ADMIN_USERNAME = "admin";
 const SEEDED_ADMIN_PASSWORD = "admin";
 const SEEDED_ADMIN_SALT = "llm-craft-seeded-admin";
+
+export function sessionCookieOptions() {
+  return {
+    httpOnly: true,
+    sameSite: "lax" as const,
+    path: "/",
+    maxAge: SESSION_COOKIE_MAX_AGE_SECONDS,
+    secure: process.env.NODE_ENV === "production"
+  };
+}
 
 type StoredUser = {
   id: string;
@@ -42,12 +54,16 @@ export async function registerUser(input: {
   password: string;
   displayName: string;
 }): Promise<{ user: AuthUser; sessionId: string } | { error: string; status: number }> {
-  await seedAdminUser();
+  await ensureAdminSeeded();
   const username = normalizeUsername(input.username);
   const displayName = input.displayName.trim();
 
   if (!username || input.password.length < 6 || !displayName) {
     return { error: "Invalid registration payload", status: 400 };
+  }
+
+  if (username.startsWith(GUEST_USERNAME_PREFIX)) {
+    return { error: "That username prefix is reserved", status: 400 };
   }
 
   if (await findUserByUsername(username)) {
@@ -86,7 +102,7 @@ export async function loginUser(input: {
   username: string;
   password: string;
 }): Promise<{ user: AuthUser; sessionId: string } | { error: string; status: number }> {
-  await seedAdminUser();
+  await ensureAdminSeeded();
   const user = await findUserByUsername(normalizeUsername(input.username));
 
   if (!user || !verifyPassword(input.password, user)) {
@@ -100,8 +116,6 @@ export async function getUserBySession(sessionId: string | undefined): Promise<{
   user: AuthUser;
   profile: UserProfile;
 } | null> {
-  await seedAdminUser();
-
   if (!sessionId) {
     return null;
   }
@@ -216,6 +230,58 @@ async function createSession(
     user: toAuthUser(user),
     sessionId
   };
+}
+
+export async function createGuestSession(): Promise<{
+  user: AuthUser;
+  profile: UserProfile;
+  sessionId: string;
+}> {
+  const suffix = randomBytes(4).toString("hex");
+  const passwordSalt = randomBytes(16).toString("hex");
+  const user: StoredUser = {
+    id: randomBytes(12).toString("hex"),
+    username: `${GUEST_USERNAME_PREFIX}${suffix}`,
+    displayName: `Guest ${suffix}`,
+    passwordHash: hashPassword(randomBytes(24).toString("hex"), passwordSalt),
+    passwordSalt
+  };
+
+  await transaction(async (client) => {
+    await client.query(
+      `
+      INSERT INTO users (
+        id, username, display_name, password_hash, password_salt
+      )
+      VALUES ($1, $2, $3, $4, $5)
+      `,
+      [user.id, user.username, user.displayName, user.passwordHash, user.passwordSalt]
+    );
+    await client.query(
+      "INSERT INTO user_profiles (user_id, display_name) VALUES ($1, $2)",
+      [user.id, user.displayName]
+    );
+  });
+
+  const session = await createSession(user);
+
+  return {
+    ...session,
+    profile: await getProfile(user.id, user.displayName)
+  };
+}
+
+declare global {
+  var llmCraftAdminSeeded: Promise<void> | undefined;
+}
+
+function ensureAdminSeeded(): Promise<void> {
+  globalThis.llmCraftAdminSeeded ??= seedAdminUser().catch((error) => {
+    globalThis.llmCraftAdminSeeded = undefined;
+    throw error;
+  });
+
+  return globalThis.llmCraftAdminSeeded;
 }
 
 async function seedAdminUser(): Promise<void> {
