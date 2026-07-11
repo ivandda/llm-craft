@@ -1354,6 +1354,15 @@ function GoalTabPanel({
         </div>
       </div>
 
+      {goalPreset.metadata.minDepth !== undefined &&
+      goalPreset.metadata.minDepth !== goalPreset.metadata.depth ? (
+        <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          No goal exists at depth {goalPreset.metadata.depth} yet, so you got
+          the closest available: depth {goalPreset.metadata.minDepth}. Deeper
+          goals appear as players and the model discover more recipes.
+        </p>
+      ) : null}
+
       <div>
         <p className="mb-2 font-mono text-xs font-semibold uppercase tracking-wider text-soot">
           Initial inventory
