@@ -26,18 +26,23 @@ import type {
 import {
   ArrowLeft,
   Brush,
-  ChevronDown,
-  ChevronUp,
+  Clock,
   Combine,
+  LayoutGrid,
   LogOut,
+  Maximize,
+  Minus,
   Moon,
+  Plus,
   RotateCcw,
   Search,
+  Settings as SettingsIcon,
   Sparkles,
   Sun,
   Target,
   Trophy,
-  UserCircle
+  UserCircle,
+  X
 } from "lucide-react";
 import {
   forwardRef,
@@ -46,7 +51,9 @@ import {
   useRef,
   useState,
   type CSSProperties,
-  type PointerEvent
+  type PointerEvent,
+  type ReactNode,
+  type WheelEvent
 } from "react";
 
 const TOKEN_WIDTH = 150;
@@ -102,6 +109,23 @@ type Point = {
   y: number;
 };
 
+type BoardView = {
+  scale: number;
+  x: number;
+  y: number;
+};
+
+type GestureState = {
+  pointers: Map<number, Point>;
+  mode: "none" | "pan" | "pinch";
+  panLast?: Point;
+  pinchDistance?: number;
+  pinchMid?: Point;
+};
+
+const MIN_ZOOM = 0.4;
+const MAX_ZOOM = 2.5;
+
 type GoalCompletion = {
   combinationsUsed: number;
   isSaving: boolean;
@@ -114,7 +138,26 @@ type Discovery = {
   isModelGenerated: boolean;
 };
 
-type SidebarTab = "elements" | "goal" | "settings";
+type SidebarTab = "elements" | "goal" | "recent" | "settings";
+
+// Below `lg`, the game switches to a touch-first model: elements/recent/
+// settings live in pop-up sheets and combining is tap-based, because
+// drag-from-a-scrolling-list fights the scroll on touch screens.
+function useIsDesktop(): boolean {
+  const [isDesktop, setIsDesktop] = useState(true);
+
+  useEffect(() => {
+    const query = window.matchMedia("(min-width: 1024px)");
+    const update = () => setIsDesktop(query.matches);
+
+    update();
+    query.addEventListener("change", update);
+
+    return () => query.removeEventListener("change", update);
+  }, []);
+
+  return isDesktop;
+}
 
 type PendingDpoChoice = {
   firstInput: ElementToken;
@@ -192,9 +235,14 @@ export function CraftGame({
   // Theme is global (persisted app-wide, applied to <html>), so toggling it
   // here stays consistent with every other screen.
   const isDarkMode = useTheme() === "dark";
-  // Mobile bottom-drawer height: 0 = peek (board maximal), 1 = default,
-  // 2 = tall (browse elements). Ignored at lg where the drawer is a sidebar.
-  const [mobileDrawerSnap, setMobileDrawerSnap] = useState<0 | 1 | 2>(1);
+  const isDesktop = useIsDesktop();
+  // Which pop-up sheet is open on mobile (null = none). Desktop uses the
+  // persistent sidebar instead.
+  const [mobileSheet, setMobileSheet] = useState<SidebarTab | null>(null);
+  // Board pan/zoom. Tokens live in a child that gets `translate(x,y) scale`;
+  // all pointer→board math divides by scale and subtracts the pan.
+  const [view, setView] = useState<BoardView>({ scale: 1, x: 0, y: 0 });
+  const gestureRef = useRef<GestureState>({ pointers: new Map(), mode: "none" });
   const [activeSidebarTab, setActiveSidebarTab] = useState<SidebarTab>(
     mode === "goal" ? "goal" : "elements"
   );
@@ -206,6 +254,7 @@ export function CraftGame({
     () => [
       { id: "elements", label: "Elements" },
       ...(mode === "goal" ? [{ id: "goal" as const, label: "Goal" }] : []),
+      { id: "recent", label: "Recent" },
       { id: "settings", label: "Settings" }
     ],
     [mode]
@@ -675,6 +724,15 @@ export function CraftGame({
     return mode === "goal" && goalPreset?.target.id === element.id;
   }
 
+  // Convert a screen point to board (content) coordinates, inverting the
+  // current pan/zoom transform applied to the token layer.
+  function toBoardPoint(clientX: number, clientY: number, rect: DOMRect): Point {
+    return {
+      x: (clientX - rect.left - view.x) / view.scale,
+      y: (clientY - rect.top - view.y) / view.scale
+    };
+  }
+
   function getBoardPosition(clientX: number, clientY: number) {
     const rect = boardRef.current?.getBoundingClientRect();
 
@@ -682,9 +740,11 @@ export function CraftGame({
       return null;
     }
 
+    const point = toBoardPoint(clientX, clientY, rect);
+
     return clampBoardPosition(
-      clientX - rect.left - TOKEN_WIDTH / 2,
-      clientY - rect.top - TOKEN_HEIGHT / 2,
+      point.x - TOKEN_WIDTH / 2,
+      point.y - TOKEN_HEIGHT / 2,
       rect
     );
   }
@@ -696,9 +756,12 @@ export function CraftGame({
       return null;
     }
 
+    // Centre of the currently visible viewport, in board coordinates.
+    const center = toBoardPoint(rect.left + rect.width / 2, rect.top + rect.height / 2, rect);
+
     return clampBoardPosition(
-      rect.width / 2 - TOKEN_WIDTH / 2 + (Math.random() - 0.5) * 140,
-      rect.height / 2 - TOKEN_HEIGHT / 2 + (Math.random() - 0.5) * 140,
+      center.x - TOKEN_WIDTH / 2 + (Math.random() - 0.5) * 120,
+      center.y - TOKEN_HEIGHT / 2 + (Math.random() - 0.5) * 120,
       rect
     );
   }
@@ -710,9 +773,10 @@ export function CraftGame({
       return [RESULT_OFFSET, RESULT_OFFSET];
     }
 
+    const point = toBoardPoint(clientX, clientY, rect);
     const position = clampBoardPosition(
-      clientX - rect.left + RESULT_OFFSET,
-      clientY - rect.top + RESULT_OFFSET,
+      point.x + RESULT_OFFSET,
+      point.y + RESULT_OFFSET,
       rect
     );
 
@@ -726,9 +790,11 @@ export function CraftGame({
       return;
     }
 
+    // offsetX/Y are screen-space (captured at pointer-down), so subtract them
+    // before dividing by scale.
     const position = clampBoardPosition(
-      clientX - rect.left - dragState.offsetX,
-      clientY - rect.top - dragState.offsetY,
+      (clientX - rect.left - view.x - dragState.offsetX) / view.scale,
+      (clientY - rect.top - view.y - dragState.offsetY) / view.scale,
       rect
     );
 
@@ -825,10 +891,13 @@ export function CraftGame({
       return { x: 0, y: 0 };
     }
 
-    return {
-      x: blackHoleRect.left - boardRect.left + blackHoleRect.width / 2,
-      y: blackHoleRect.top - boardRect.top + blackHoleRect.height / 2
-    };
+    // The black hole is drawn unscaled on the container; convert its centre to
+    // the (pan/zoom-transformed) content coordinates the tokens animate in.
+    return toBoardPoint(
+      blackHoleRect.left + blackHoleRect.width / 2,
+      blackHoleRect.top + blackHoleRect.height / 2,
+      boardRect
+    );
   }
 
   function removeBoardElement(instanceId: string) {
@@ -973,17 +1042,330 @@ export function CraftGame({
     }
   }
 
-  return (
-    <main className="h-[100dvh] overflow-hidden bg-paper text-ink">
+  // Add an element picked from a pop-up sheet to the board (touch: no drag
+  // from the scrolling list). Dropped near the centre of the current view.
+  function placeElementOnBoard(element: ElementToken) {
+    setErrorMessage(null);
+    const position = getFallbackBoardPosition();
+
+    if (!position) {
+      return;
+    }
+
+    setBoardElements((currentElements) => [
+      ...currentElements,
+      createBoardElement(element, position.x, position.y, getNextZIndex(currentElements))
+    ]);
+    setMobileSheet(null);
+  }
+
+  // --- Board pan / zoom ---
+
+  // Scale by `factor`, keeping the board point under (anchorX, anchorY) fixed.
+  function zoomAt(factor: number, anchorX: number, anchorY: number) {
+    const rect = boardRef.current?.getBoundingClientRect();
+
+    if (!rect) {
+      return;
+    }
+
+    setView((current) => {
+      const nextScale = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, current.scale * factor));
+
+      if (nextScale === current.scale) {
+        return current;
+      }
+
+      const anchorLeft = anchorX - rect.left;
+      const anchorTop = anchorY - rect.top;
+
+      return {
+        scale: nextScale,
+        x: anchorLeft - ((anchorLeft - current.x) / current.scale) * nextScale,
+        y: anchorTop - ((anchorTop - current.y) / current.scale) * nextScale
+      };
+    });
+  }
+
+  function zoomByStep(direction: 1 | -1) {
+    const rect = boardRef.current?.getBoundingClientRect();
+
+    if (!rect) {
+      return;
+    }
+
+    zoomAt(
+      direction === 1 ? 1.25 : 0.8,
+      rect.left + rect.width / 2,
+      rect.top + rect.height / 2
+    );
+  }
+
+  function resetView() {
+    setView({ scale: 1, x: 0, y: 0 });
+  }
+
+  function handleBoardWheel(event: WheelEvent<HTMLDivElement>) {
+    zoomAt(event.deltaY < 0 ? 1.1 : 0.9, event.clientX, event.clientY);
+  }
+
+  function isInteractiveTarget(target: EventTarget | null): boolean {
+    return (
+      // Use Element (not HTMLElement): the pointer often lands on an inner SVG
+      // <path> of a button icon, which is an SVGElement. Tokens drag
+      // themselves; buttons (zoom/back) must keep their click, so panning must
+      // not capture the pointer away from them.
+      target instanceof Element &&
+      target.closest("button, a, input, select, textarea, [data-board-token-id]") !==
+        null
+    );
+  }
+
+  // Pan/pinch on empty board space. Token drags capture their own pointer and
+  // are ignored here (and skipped while a token drag is in progress).
+  function handleBoardPointerDown(event: PointerEvent<HTMLDivElement>) {
+    if (dragStateRef.current || isInteractiveTarget(event.target)) {
+      return;
+    }
+
+    const gesture = gestureRef.current;
+    gesture.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    event.currentTarget.setPointerCapture(event.pointerId);
+
+    if (gesture.pointers.size === 1) {
+      gesture.mode = "pan";
+      gesture.panLast = { x: event.clientX, y: event.clientY };
+    } else if (gesture.pointers.size === 2) {
+      const [a, b] = [...gesture.pointers.values()];
+      gesture.mode = "pinch";
+      gesture.pinchDistance = Math.hypot(a.x - b.x, a.y - b.y);
+      gesture.pinchMid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    }
+  }
+
+  function handleBoardPointerMove(event: PointerEvent<HTMLDivElement>) {
+    const gesture = gestureRef.current;
+
+    if (!gesture.pointers.has(event.pointerId)) {
+      return;
+    }
+
+    gesture.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+
+    if (gesture.mode === "pan" && gesture.panLast) {
+      const dx = event.clientX - gesture.panLast.x;
+      const dy = event.clientY - gesture.panLast.y;
+      gesture.panLast = { x: event.clientX, y: event.clientY };
+      setView((current) => ({ ...current, x: current.x + dx, y: current.y + dy }));
+    } else if (gesture.mode === "pinch" && gesture.pinchDistance && gesture.pinchMid) {
+      const [a, b] = [...gesture.pointers.values()];
+
+      if (!a || !b) {
+        return;
+      }
+
+      const distance = Math.hypot(a.x - b.x, a.y - b.y);
+      const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      const panDx = mid.x - gesture.pinchMid.x;
+      const panDy = mid.y - gesture.pinchMid.y;
+
+      zoomAt(distance / gesture.pinchDistance, gesture.pinchMid.x, gesture.pinchMid.y);
+      setView((current) => ({ ...current, x: current.x + panDx, y: current.y + panDy }));
+
+      gesture.pinchDistance = distance;
+      gesture.pinchMid = mid;
+    }
+  }
+
+  function handleBoardPointerUp(event: PointerEvent<HTMLDivElement>) {
+    const gesture = gestureRef.current;
+    gesture.pointers.delete(event.pointerId);
+
+    if (gesture.pointers.size === 0) {
+      gesture.mode = "none";
+    } else if (gesture.pointers.size === 1) {
+      const remaining = [...gesture.pointers.values()][0];
+      gesture.mode = "pan";
+      gesture.panLast = { x: remaining.x, y: remaining.y };
+    }
+  }
+
+  // Shared panel bodies, rendered in the desktop sidebar and the mobile
+  // pop-up sheets from a single source of truth.
+  const renderElements = (interaction: "drag" | "tap") => (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="mb-3 shrink-0">
+        <label className="relative block">
+          <Search
+            aria-hidden="true"
+            className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-soot"
+            size={16}
+          />
+          <input
+            className="h-10 w-full rounded-md border border-linen bg-paper pl-9 pr-3 text-sm outline-none transition placeholder:text-soot focus:border-cobalt focus:bg-surface"
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search elements"
+            value={query}
+          />
+        </label>
+        <p className="mt-2 text-right font-mono text-xs text-soot">
+          {filteredInventory.length} of {inventory.length} elements
+        </p>
+      </div>
+
       <div
-        className={`grid h-[100dvh] grid-cols-1 overflow-hidden lg:grid-cols-[minmax(0,1fr)_320px] lg:grid-rows-1 ${
-          mobileDrawerSnap === 0
-            ? "grid-rows-[minmax(0,1fr)_3.25rem]"
-            : mobileDrawerSnap === 2
-              ? "grid-rows-[minmax(0,20dvh)_minmax(0,1fr)]"
-              : "grid-rows-[minmax(0,1fr)_minmax(0,46dvh)]"
+        className={`grid min-h-0 flex-1 content-start gap-2 overflow-y-auto pr-1 ${
+          interaction === "tap" ? "grid-cols-3 sm:grid-cols-4" : "grid-cols-2"
         }`}
       >
+        {filteredInventory.map((element) => (
+          <InventoryToken
+            element={element}
+            interactionMode={interaction}
+            key={element.id}
+            onPick={placeElementOnBoard}
+            onPointerCancel={cancelActiveDrag}
+            onPointerDown={beginInventoryDrag}
+            onPointerMove={updateInventoryDrag}
+            onPointerUp={finishInventoryDrag}
+          />
+        ))}
+        {filteredInventory.length === 0 ? (
+          <p className="col-span-full rounded-md border border-dashed border-linen p-4 text-center text-sm text-soot">
+            No elements match your search.
+          </p>
+        ) : null}
+      </div>
+
+      {interaction === "tap" ? (
+        <p className="mt-2 shrink-0 text-center text-xs text-soot">
+          Tap an element to drop it on the board.
+        </p>
+      ) : null}
+    </div>
+  );
+
+  const renderRecent = () => (
+    <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+      <div className="grid gap-2">
+        {history.length === 0 ? (
+          <div className="rounded-md border border-dashed border-linen p-4 text-sm text-soot">
+            No recipes yet.
+          </div>
+        ) : (
+          history.map((item) => <RecipeCard item={item} key={item.id} />)
+        )}
+      </div>
+    </div>
+  );
+
+  const renderSettings = () => (
+    <div className="grid min-h-0 flex-1 content-start gap-2 overflow-y-auto pr-1">
+      <label className="flex min-h-11 items-center gap-3 rounded-md border border-linen bg-paper px-3 text-sm font-medium">
+        <Combine className="shrink-0 text-soot" size={16} />
+        <span className="flex-1">Consume inputs</span>
+        <input
+          checked={consumeInputsOnCombine}
+          className="size-4 accent-cobalt"
+          onChange={(event) => setConsumeInputsOnCombine(event.target.checked)}
+          type="checkbox"
+        />
+      </label>
+      <label className="flex min-h-11 items-center gap-3 rounded-md border border-linen bg-paper px-3 text-sm font-medium">
+        <Sparkles className="shrink-0 text-soot" size={16} />
+        <span className="flex-1">Help train the AI</span>
+        <input
+          checked={isDpoTestMode}
+          className="size-4 accent-cobalt"
+          onChange={(event) => setIsDpoTestMode(event.target.checked)}
+          type="checkbox"
+        />
+      </label>
+      <label className="flex min-h-11 items-center gap-3 rounded-md border border-linen bg-paper px-3 text-sm font-medium">
+        {isDarkMode ? (
+          <Sun className="shrink-0 text-soot" size={16} />
+        ) : (
+          <Moon className="shrink-0 text-soot" size={16} />
+        )}
+        <span className="flex-1">Dark mode</span>
+        <input
+          checked={isDarkMode}
+          className="size-4 accent-cobalt"
+          onChange={(event) => setTheme(event.target.checked ? "dark" : "light")}
+          type="checkbox"
+        />
+      </label>
+
+      <div className="my-1 border-t border-linen" />
+
+      <button
+        className="flex min-h-11 w-full items-center gap-3 rounded-md border border-linen bg-paper px-3 text-left text-sm font-medium transition hover:bg-surface"
+        onClick={() => onOpenProfile({ inventory, history })}
+        type="button"
+      >
+        <UserCircle className="shrink-0 text-soot" size={16} />
+        Profile
+      </button>
+      {mode === "sandbox" ? (
+        <>
+          <button
+            className="flex min-h-11 w-full items-center gap-3 rounded-md border border-linen bg-paper px-3 text-left text-sm font-medium transition hover:bg-surface disabled:cursor-not-allowed disabled:opacity-45"
+            disabled={boardElements.length === 0 || isSweeping}
+            onClick={clearSandboxWithSweep}
+            type="button"
+          >
+            <Brush className="shrink-0 text-soot" size={16} />
+            Clear board
+          </button>
+          <button
+            className="flex min-h-11 w-full items-center gap-3 rounded-md border border-linen bg-paper px-3 text-left text-sm font-medium transition hover:bg-surface"
+            onClick={() => resetGame()}
+            type="button"
+          >
+            <RotateCcw className="shrink-0 text-soot" size={16} />
+            Reset progress
+          </button>
+        </>
+      ) : null}
+      <button
+        className="flex min-h-11 w-full items-center gap-3 rounded-md border border-linen bg-paper px-3 text-left text-sm font-medium transition hover:bg-surface"
+        onClick={onLogout}
+        type="button"
+      >
+        <LogOut className="shrink-0 text-soot" size={16} />
+        Log out
+      </button>
+    </div>
+  );
+
+  const renderGoalPanel = () =>
+    mode === "goal" && goalPreset ? (
+      <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+        <GoalTabPanel
+          goalDepth={goalDepth}
+          goalGenerationMessage={goalGenerationMessage}
+          goalPreset={goalPreset}
+          isGeneratingGoal={isGeneratingGoal}
+          leaderboard={leaderboard}
+          onGenerateNewGoal={generateNewGoal}
+          onGoalDepthChange={onGoalDepthChange}
+          onReset={() => resetGame()}
+        />
+      </div>
+    ) : null;
+
+  const mobileTabs: { id: SidebarTab; label: string; icon: ReactNode; badge?: number }[] = [
+    { id: "elements", label: "Elements", icon: <LayoutGrid size={18} />, badge: inventory.length },
+    ...(mode === "goal"
+      ? [{ id: "goal" as const, label: "Goal", icon: <Target size={18} /> }]
+      : []),
+    { id: "recent", label: "Recent", icon: <Clock size={18} />, badge: history.length || undefined },
+    { id: "settings", label: "Settings", icon: <SettingsIcon size={18} /> }
+  ];
+
+  return (
+    <main className="h-[100dvh] overflow-hidden bg-paper text-ink">
+      <div className="grid h-[100dvh] grid-cols-1 grid-rows-[minmax(0,1fr)_auto] overflow-hidden lg:grid-cols-[minmax(0,1fr)_320px] lg:grid-rows-1">
         <section className="relative min-h-0 overflow-hidden border-b border-linen bg-paper lg:border-b-0 lg:border-r">
           <div className="absolute left-3 top-3 z-30 flex items-center gap-2 rounded-md border border-linen bg-surface/90 px-2.5 py-2 shadow-hairline backdrop-blur">
             <button
@@ -1004,13 +1386,19 @@ export function CraftGame({
           </div>
 
           <div
-            className="absolute inset-0 z-0"
+            className="absolute inset-0 z-0 touch-none"
+            onPointerCancel={handleBoardPointerUp}
+            onPointerDown={handleBoardPointerDown}
+            onPointerMove={handleBoardPointerMove}
+            onPointerUp={handleBoardPointerUp}
+            onWheel={handleBoardWheel}
             ref={boardRef}
             style={{
               backgroundImage: isDarkMode
                 ? "radial-gradient(circle at 1px 1px, rgba(244,244,245,0.11) 1px, transparent 0)"
                 : "radial-gradient(circle at 1px 1px, rgba(38,34,27,0.1) 1px, transparent 0)",
-              backgroundSize: "28px 28px"
+              backgroundSize: `${28 * view.scale}px ${28 * view.scale}px`,
+              backgroundPosition: `${view.x}px ${view.y}px`
             }}
           >
             <BlackHoleDropZone
@@ -1018,28 +1406,44 @@ export function CraftGame({
               isHot={isOverBlackHole}
               ref={blackHoleRef}
             />
-            {isSweeping && sweepTarget ? (
-              <SweepAnimation target={sweepTarget} />
-            ) : null}
-            {boardElements.map((element) => (
-              <BoardToken
-                element={element}
-                isCombining={isCombining}
-                isDragging={dragState?.instanceId === element.instanceId}
-                isSweeping={isSweeping}
-                key={element.instanceId}
-                onPointerCancel={cancelActiveDrag}
-                onPointerDown={beginBoardDrag}
-                onPointerMove={updateBoardDrag}
-                onPointerUp={finishBoardDrag}
-                sweepTarget={sweepTarget}
-                vanishTarget={
-                  vanishingToken?.instanceId === element.instanceId
-                    ? vanishingToken.target
-                    : null
-                }
-              />
-            ))}
+            {/* Tokens live in a pan/zoom-transformed layer. */}
+            <div
+              className="absolute inset-0 origin-top-left"
+              style={{
+                transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})`
+              }}
+            >
+              {isSweeping && sweepTarget ? (
+                <SweepAnimation target={sweepTarget} />
+              ) : null}
+              {boardElements.map((element) => (
+                <BoardToken
+                  element={element}
+                  isCombining={isCombining}
+                  isDragging={dragState?.instanceId === element.instanceId}
+                  isSweeping={isSweeping}
+                  key={element.instanceId}
+                  onPointerCancel={cancelActiveDrag}
+                  onPointerDown={beginBoardDrag}
+                  onPointerMove={updateBoardDrag}
+                  onPointerUp={finishBoardDrag}
+                  sweepTarget={sweepTarget}
+                  vanishTarget={
+                    vanishingToken?.instanceId === element.instanceId
+                      ? vanishingToken.target
+                      : null
+                  }
+                />
+              ))}
+            </div>
+
+            <ZoomControls
+              canReset={view.scale !== 1 || view.x !== 0 || view.y !== 0}
+              onReset={resetView}
+              onZoomIn={() => zoomByStep(1)}
+              onZoomOut={() => zoomByStep(-1)}
+              scale={view.scale}
+            />
           </div>
 
           {mode === "goal" && goalPreset ? (
@@ -1054,7 +1458,9 @@ export function CraftGame({
           {history.length === 0 && !isCombining && !goalCompletion ? (
             <div className="pointer-events-none absolute inset-x-0 bottom-8 z-10 flex justify-center px-4">
               <p className="max-w-md rounded-md border border-dashed border-linen bg-surface/85 px-4 py-3 text-center text-sm text-soot backdrop-blur">
-                Drag one element onto another to combine them
+                {isDesktop
+                  ? "Drag one element onto another to combine them"
+                  : "Tap Elements to add, then drag one onto another to combine"}
                 {mode === "goal" ? " — craft your way to the goal element" : ""}.
               </p>
             </div>
@@ -1087,31 +1493,11 @@ export function CraftGame({
         </section>
 
         <aside
-          className={`flex min-h-0 flex-col overflow-hidden p-3 transition-colors lg:p-4 ${
-            dragState?.kind === "board"
-              ? "bg-paper"
-              : "bg-surface"
+          className={`hidden min-h-0 flex-col overflow-hidden p-4 transition-colors lg:flex ${
+            dragState?.kind === "board" ? "bg-paper" : "bg-surface"
           }`}
         >
-          {/* Mobile drawer handle: cycles peek → default → tall so the board
-              can take most of the screen when crafting. Hidden on desktop. */}
-          <button
-            aria-label="Resize elements panel"
-            className="group mb-2 flex h-7 shrink-0 items-center justify-center gap-2 rounded-md text-soot transition hover:text-ink lg:hidden"
-            onClick={() =>
-              setMobileDrawerSnap((snap) => ((snap + 1) % 3) as 0 | 1 | 2)
-            }
-            title="Resize elements panel"
-            type="button"
-          >
-            <span className="h-1 w-9 rounded-full bg-linen transition group-hover:bg-soot" />
-            {mobileDrawerSnap === 2 ? (
-              <ChevronDown size={14} />
-            ) : (
-              <ChevronUp size={14} />
-            )}
-          </button>
-          <div className="mb-3 flex shrink-0 gap-1 rounded-md border border-linen bg-paper p-1 lg:mb-4">
+          <div className="mb-4 flex shrink-0 gap-1 rounded-md border border-linen bg-paper p-1">
             {sidebarTabs.map((tab) => (
               <button
                 className={`h-8 flex-1 rounded font-mono text-xs uppercase tracking-wider transition ${
@@ -1128,158 +1514,48 @@ export function CraftGame({
             ))}
           </div>
 
-          {sidebarTab === "elements" ? (
-            <>
-              <div className="mb-3 shrink-0">
-                <label className="relative block">
-                  <Search
-                    aria-hidden="true"
-                    className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-soot"
-                    size={16}
-                  />
-                  <input
-                    className="h-10 w-full rounded-md border border-linen bg-paper pl-9 pr-3 text-sm outline-none transition placeholder:text-soot focus:border-cobalt focus:bg-surface"
-                    onChange={(event) => setQuery(event.target.value)}
-                    placeholder="Search"
-                    value={query}
-                  />
-                </label>
-                <p className="mt-2 text-right font-mono text-xs text-soot">
-                  {inventory.length} elements
-                </p>
-              </div>
-
-              <div className="grid min-h-0 flex-1 grid-cols-2 content-start gap-2 overflow-y-auto pr-1">
-                {filteredInventory.map((element) => (
-                  <InventoryToken
-                    element={element}
-                    key={element.id}
-                    onPointerCancel={cancelActiveDrag}
-                    onPointerDown={beginInventoryDrag}
-                    onPointerMove={updateInventoryDrag}
-                    onPointerUp={finishInventoryDrag}
-                  />
-                ))}
-              </div>
-
-              <div className="mt-5 min-h-0 shrink-0 border-t border-linen pt-4">
-                <div className="mb-3 flex items-center justify-between gap-3">
-                  <h2 className="text-base font-semibold">Recent</h2>
-                  <span className="font-mono text-xs text-soot">
-                    {history.length}
-                  </span>
-                </div>
-
-                <div className="grid max-h-52 gap-2 overflow-y-auto pr-1 lg:max-h-[220px]">
-                  {history.length === 0 ? (
-                    <div className="rounded-md border border-dashed border-linen p-4 text-sm text-soot">
-                      No recipes yet.
-                    </div>
-                  ) : (
-                    history.slice(0, 8).map((item) => (
-                      <RecipeCard item={item} key={item.id} />
-                    ))
-                  )}
-                </div>
-              </div>
-            </>
-          ) : null}
-
-          {sidebarTab === "goal" && mode === "goal" && goalPreset ? (
-            <div className="min-h-0 flex-1 overflow-y-auto pr-1">
-              <GoalTabPanel
-                goalDepth={goalDepth}
-                goalGenerationMessage={goalGenerationMessage}
-                goalPreset={goalPreset}
-                isGeneratingGoal={isGeneratingGoal}
-                leaderboard={leaderboard}
-                onGenerateNewGoal={generateNewGoal}
-                onGoalDepthChange={onGoalDepthChange}
-                onReset={() => resetGame()}
-              />
-            </div>
-          ) : null}
-
-          {sidebarTab === "settings" ? (
-            <div className="grid min-h-0 flex-1 content-start gap-2 overflow-y-auto pr-1">
-              <label className="flex min-h-11 items-center gap-3 rounded-md border border-linen bg-paper px-3 text-sm font-medium">
-                <Combine className="shrink-0 text-soot" size={16} />
-                <span className="flex-1">Consume inputs</span>
-                <input
-                  checked={consumeInputsOnCombine}
-                  className="size-4 accent-cobalt"
-                  onChange={(event) => setConsumeInputsOnCombine(event.target.checked)}
-                  type="checkbox"
-                />
-              </label>
-              <label className="flex min-h-11 items-center gap-3 rounded-md border border-linen bg-paper px-3 text-sm font-medium">
-                <Sparkles className="shrink-0 text-soot" size={16} />
-                <span className="flex-1">Help train the AI</span>
-                <input
-                  checked={isDpoTestMode}
-                  className="size-4 accent-cobalt"
-                  onChange={(event) => setIsDpoTestMode(event.target.checked)}
-                  type="checkbox"
-                />
-              </label>
-              <label className="flex min-h-11 items-center gap-3 rounded-md border border-linen bg-paper px-3 text-sm font-medium">
-                {isDarkMode ? (
-                  <Sun className="shrink-0 text-soot" size={16} />
-                ) : (
-                  <Moon className="shrink-0 text-soot" size={16} />
-                )}
-                <span className="flex-1">Dark mode</span>
-                <input
-                  checked={isDarkMode}
-                  className="size-4 accent-cobalt"
-                  onChange={(event) => setTheme(event.target.checked ? "dark" : "light")}
-                  type="checkbox"
-                />
-              </label>
-
-              <div className="my-1 border-t border-linen" />
-
-              <button
-                className="flex min-h-11 w-full items-center gap-3 rounded-md border border-linen bg-paper px-3 text-left text-sm font-medium transition hover:bg-surface"
-                onClick={() => onOpenProfile({ inventory, history })}
-                type="button"
-              >
-                <UserCircle className="shrink-0 text-soot" size={16} />
-                Profile
-              </button>
-              {mode === "sandbox" ? (
-                <>
-                  <button
-                    className="flex min-h-11 w-full items-center gap-3 rounded-md border border-linen bg-paper px-3 text-left text-sm font-medium transition hover:bg-surface disabled:cursor-not-allowed disabled:opacity-45"
-                    disabled={boardElements.length === 0 || isSweeping}
-                    onClick={clearSandboxWithSweep}
-                    type="button"
-                  >
-                    <Brush className="shrink-0 text-soot" size={16} />
-                    Clear board
-                  </button>
-                  <button
-                    className="flex min-h-11 w-full items-center gap-3 rounded-md border border-linen bg-paper px-3 text-left text-sm font-medium transition hover:bg-surface"
-                    onClick={() => resetGame()}
-                    type="button"
-                  >
-                    <RotateCcw className="shrink-0 text-soot" size={16} />
-                    Reset progress
-                  </button>
-                </>
-              ) : null}
-              <button
-                className="flex min-h-11 w-full items-center gap-3 rounded-md border border-linen bg-paper px-3 text-left text-sm font-medium transition hover:bg-surface"
-                onClick={onLogout}
-                type="button"
-              >
-                <LogOut className="shrink-0 text-soot" size={16} />
-                Log out
-              </button>
-            </div>
-          ) : null}
+          {sidebarTab === "elements" ? renderElements("drag") : null}
+          {sidebarTab === "goal" ? renderGoalPanel() : null}
+          {sidebarTab === "recent" ? renderRecent() : null}
+          {sidebarTab === "settings" ? renderSettings() : null}
         </aside>
+
+        {/* Mobile: a bottom tab bar opens pop-up sheets instead of a drag-from
+            list, so scrolling never fights a drag. Hidden on desktop. */}
+        <nav className="flex items-stretch gap-1 border-t border-linen bg-surface p-2 lg:hidden">
+          {mobileTabs.map((tab) => (
+            <button
+              className="relative flex flex-1 flex-col items-center justify-center gap-0.5 rounded-md py-1.5 text-soot transition hover:bg-paper hover:text-ink"
+              key={tab.id}
+              onClick={() => setMobileSheet(tab.id)}
+              type="button"
+            >
+              {tab.icon}
+              <span className="font-mono text-[11px] uppercase tracking-wide">
+                {tab.label}
+              </span>
+              {tab.badge ? (
+                <span className="absolute right-2 top-0.5 rounded-full bg-cobalt px-1.5 text-[10px] font-semibold text-white">
+                  {tab.badge}
+                </span>
+              ) : null}
+            </button>
+          ))}
+        </nav>
       </div>
+
+      {/* Mobile pop-up sheets. */}
+      {!isDesktop && mobileSheet ? (
+        <MobileSheet
+          title={mobileSheet}
+          onClose={() => setMobileSheet(null)}
+        >
+          {mobileSheet === "elements" ? renderElements("tap") : null}
+          {mobileSheet === "goal" ? renderGoalPanel() : null}
+          {mobileSheet === "recent" ? renderRecent() : null}
+          {mobileSheet === "settings" ? renderSettings() : null}
+        </MobileSheet>
+      ) : null}
 
       {dragState?.kind === "inventory" ? (
         <DragPreview dragState={dragState} pointerRef={dragPointerRef} />
@@ -1669,6 +1945,57 @@ function GoalBanner({
   );
 }
 
+function ZoomControls({
+  canReset,
+  onReset,
+  onZoomIn,
+  onZoomOut,
+  scale
+}: {
+  canReset: boolean;
+  onReset: () => void;
+  onZoomIn: () => void;
+  onZoomOut: () => void;
+  scale: number;
+}) {
+  return (
+    <div className="absolute right-3 top-3 z-30 flex flex-col items-stretch gap-0.5 rounded-md border border-linen bg-surface/90 p-1 shadow-hairline backdrop-blur">
+      <button
+        aria-label="Zoom in"
+        className="grid size-8 place-items-center rounded text-soot transition hover:bg-paper hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
+        disabled={scale >= MAX_ZOOM}
+        onClick={onZoomIn}
+        type="button"
+      >
+        <Plus size={16} />
+      </button>
+      <span className="text-center font-mono text-[10px] tabular-nums text-soot">
+        {Math.round(scale * 100)}%
+      </span>
+      <button
+        aria-label="Zoom out"
+        className="grid size-8 place-items-center rounded text-soot transition hover:bg-paper hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
+        disabled={scale <= MIN_ZOOM}
+        onClick={onZoomOut}
+        type="button"
+      >
+        <Minus size={16} />
+      </button>
+      {canReset ? (
+        <button
+          aria-label="Reset zoom"
+          className="grid size-8 place-items-center rounded text-soot transition hover:bg-paper hover:text-ink"
+          onClick={onReset}
+          title="Reset view"
+          type="button"
+        >
+          <Maximize size={14} />
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 const BlackHoleDropZone = forwardRef<
   HTMLDivElement,
   { isActive: boolean; isHot: boolean }
@@ -1763,7 +2090,7 @@ function BoardToken({
   return (
     <button
       className={`element-card absolute flex h-12 w-[150px] touch-none select-none items-center gap-2 rounded-md border px-2.5 text-left shadow-sm transition-shadow hover:shadow-md ${
-        isDragging ? "opacity-90 shadow-lg ring-2 ring-cobalt" : ""
+        isDragging ? "opacity-95 shadow-lg ring-2 ring-cobalt" : ""
       } ${
         isCombining || isSweeping
           ? "cursor-wait"
@@ -1800,12 +2127,16 @@ function BoardToken({
 
 function InventoryToken({
   element,
+  interactionMode,
+  onPick,
   onPointerCancel,
   onPointerDown,
   onPointerMove,
   onPointerUp
 }: {
   element: ElementToken;
+  interactionMode: "drag" | "tap";
+  onPick: (element: ElementToken) => void;
   onPointerCancel: () => void;
   onPointerDown: (
     event: PointerEvent<HTMLButtonElement>,
@@ -1814,13 +2145,27 @@ function InventoryToken({
   onPointerMove: (event: PointerEvent<HTMLButtonElement>) => void;
   onPointerUp: (event: PointerEvent<HTMLButtonElement>) => void;
 }) {
+  const isTap = interactionMode === "tap";
+  // Touch: a plain tap that adds to the board — no pointer-drag handlers, so it
+  // never captures the pointer and the list scrolls normally.
+  const handlers = isTap
+    ? { onClick: () => onPick(element) }
+    : {
+        onPointerCancel,
+        onPointerDown: (event: PointerEvent<HTMLButtonElement>) =>
+          onPointerDown(event, element),
+        onPointerMove,
+        onPointerUp
+      };
+
   return (
     <button
-      className="element-card flex min-h-16 cursor-grab touch-none select-none flex-col items-center justify-center rounded-md border px-2 py-2 text-center transition hover:shadow-lift active:cursor-grabbing"
-      onPointerCancel={onPointerCancel}
-      onPointerDown={(event) => onPointerDown(event, element)}
-      onPointerMove={onPointerMove}
-      onPointerUp={onPointerUp}
+      className={`element-card flex min-h-16 select-none flex-col items-center justify-center rounded-md border px-2 py-2 text-center transition hover:shadow-lift ${
+        isTap
+          ? "cursor-pointer active:scale-95"
+          : "cursor-grab touch-none active:cursor-grabbing"
+      }`}
+      {...handlers}
       style={{ "--el-hue": getHueForConcept(element.name) } as CSSProperties}
       type="button"
     >
@@ -1829,6 +2174,43 @@ function InventoryToken({
         {element.name}
       </span>
     </button>
+  );
+}
+
+function MobileSheet({
+  title,
+  onClose,
+  children
+}: {
+  title: string;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex flex-col justify-end bg-black/40 backdrop-blur-sm lg:hidden"
+      onClick={onClose}
+    >
+      <div
+        className="flex max-h-[85dvh] min-h-[50dvh] flex-col rounded-t-2xl border-t border-linen bg-surface"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="flex shrink-0 items-center justify-between border-b border-linen px-4 py-3">
+          <h2 className="font-display text-base font-semibold capitalize">
+            {title}
+          </h2>
+          <button
+            aria-label="Close"
+            className="grid size-9 place-items-center rounded-md border border-linen text-soot transition hover:bg-paper hover:text-ink"
+            onClick={onClose}
+            type="button"
+          >
+            <X size={18} />
+          </button>
+        </div>
+        <div className="flex min-h-0 flex-1 flex-col p-3">{children}</div>
+      </div>
+    </div>
   );
 }
 
