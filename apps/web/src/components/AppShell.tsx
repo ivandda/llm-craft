@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  requestAppConfig,
   requestCurrentSession,
   requestGuestSession,
   requestLogin,
@@ -14,7 +15,8 @@ import { isGuestUser } from "@/lib/guests";
 import {
   COMBINER_MODEL_OPTIONS,
   DEFAULT_COMBINER_MODEL,
-  isKnownCombinerModel
+  isKnownCombinerModel,
+  QWEN_COMBINER_MODEL
 } from "@/lib/agentModels";
 import { GOAL_PRESET } from "@/lib/gameModes";
 import {
@@ -65,6 +67,8 @@ export function AppShell() {
   const [selectedCombinerModel, setSelectedCombinerModel] =
     useState(DEFAULT_COMBINER_MODEL);
   const [hasHydratedCombinerModel, setHasHydratedCombinerModel] = useState(false);
+  const [qwenAvailable, setQwenAvailable] = useState(false);
+  const [hasLoadedConfig, setHasLoadedConfig] = useState(false);
   const [activeGoalPreset, setActiveGoalPreset] = useState<GoalPreset>(GOAL_PRESET);
   const [snapshot, setSnapshot] = useState<GameSnapshot>(EMPTY_SNAPSHOT);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
@@ -103,16 +107,44 @@ export function AppShell() {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+
+    requestAppConfig().then((config) => {
+      if (!cancelled) {
+        setQwenAvailable(config.qwenAvailable);
+        setHasLoadedConfig(true);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     if (!session) {
       setHasHydratedCombinerModel(false);
       return;
     }
 
-    setSelectedCombinerModel(
-      readStoredModel(createCombinerModelStorageKey(session.user.id))
+    // Wait for the availability flag so the first-time default lands on the
+    // fine-tuned Qwen model whenever it's on offer, without clobbering an
+    // explicit choice the user has already saved.
+    if (!hasLoadedConfig) {
+      return;
+    }
+
+    const storedModel = readStoredModel(
+      createCombinerModelStorageKey(session.user.id)
     );
+    const defaultModel =
+      qwenAvailable && isKnownCombinerModel(QWEN_COMBINER_MODEL)
+        ? QWEN_COMBINER_MODEL
+        : DEFAULT_COMBINER_MODEL;
+
+    setSelectedCombinerModel(storedModel ?? defaultModel);
     setHasHydratedCombinerModel(true);
-  }, [session?.user.id]);
+  }, [session?.user.id, hasLoadedConfig, qwenAvailable]);
 
   useEffect(() => {
     if (!session || !hasHydratedCombinerModel) {
@@ -549,18 +581,20 @@ function createCombinerModelStorageKey(userId: string): string {
   return `llm-craft.v2.${normalizeStorageSegment(userId)}.combinerModel`;
 }
 
-function readStoredModel(key: string): string {
+// Returns the user's saved combiner model, or null when they've never picked
+// one — the caller decides the default so it can factor in model availability.
+function readStoredModel(key: string): string | null {
   const rawValue = window.localStorage.getItem(key);
 
   if (!rawValue) {
-    return DEFAULT_COMBINER_MODEL;
+    return null;
   }
 
   try {
     const model = JSON.parse(rawValue) as unknown;
-    return isKnownCombinerModel(model) ? model : DEFAULT_COMBINER_MODEL;
+    return isKnownCombinerModel(model) ? model : null;
   } catch {
-    return DEFAULT_COMBINER_MODEL;
+    return null;
   }
 }
 
