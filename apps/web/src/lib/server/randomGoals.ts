@@ -139,9 +139,16 @@ export function buildRandomGoalCandidate(
   const compatiblePresets = INITIAL_INVENTORY_PRESETS.filter(
     (preset) => depth >= preset.minDepth && depth <= preset.maxDepth
   );
-  const candidateDepths = [depth, depth - 1, depth + 1].filter(isValidGoalDepth);
+  // Nearest-first fallback across the whole valid range: if no target exists
+  // at the exact requested depth, prefer the closest depth that has one
+  // (shallower before deeper on ties) instead of giving up after ±1.
+  const candidateDepths = [depth];
+  for (let distance = 1; distance <= MAX_GOAL_DEPTH; distance += 1) {
+    candidateDepths.push(depth - distance, depth + distance);
+  }
+  const validCandidateDepths = candidateDepths.filter(isValidGoalDepth);
 
-  for (const candidateDepth of candidateDepths) {
+  for (const candidateDepth of validCandidateDepths) {
     const candidates = compatiblePresets.flatMap((preset) =>
       buildCandidatesForPreset(normalizedRecipes, preset, candidateDepth, seed)
     );
