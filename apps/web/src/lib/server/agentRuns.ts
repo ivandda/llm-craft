@@ -1,5 +1,9 @@
 import { query } from "@/lib/server/db";
-import type { AgentRankingEntry, AgentTestReport } from "@/lib/types";
+import type {
+  AgentRankingEntry,
+  AgentRunSummary,
+  AgentTestReport
+} from "@/lib/types";
 import { randomBytes } from "crypto";
 
 type RankingRow = {
@@ -39,6 +43,42 @@ export async function saveAgentRun(
       JSON.stringify(report)
     ]
   );
+}
+
+type RecentRunRow = {
+  id: string;
+  model: string;
+  success: boolean;
+  stop_reason: string;
+  combinations_used: number;
+  created_at: string;
+  raw_report: AgentTestReport;
+};
+
+export async function listRecentAgentRuns(
+  depth: number,
+  limit = 12
+): Promise<AgentRunSummary[]> {
+  const result = await query<RecentRunRow>(
+    `
+    SELECT id, model, success, stop_reason, combinations_used, created_at, raw_report
+    FROM agent_runs
+    WHERE requested_depth = $1
+    ORDER BY created_at DESC
+    LIMIT $2
+    `,
+    [depth, limit]
+  );
+
+  return result.rows.map((row) => ({
+    id: row.id,
+    model: row.model,
+    success: row.success,
+    stopReason: row.stop_reason,
+    combinationsUsed: row.combinations_used,
+    createdAt: new Date(row.created_at).toISOString(),
+    report: row.raw_report
+  }));
 }
 
 export async function listAgentRankings(

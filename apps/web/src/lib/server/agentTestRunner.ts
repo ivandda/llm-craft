@@ -350,7 +350,7 @@ function getAgentRequestTimeoutMs(model: string): number | undefined {
 // Daily seed: every model attempting the same depth on the same day faces the
 // same goal, so arena rankings compare like with like. randomUUID stays
 // available for explicit per-run seeds passed via the request.
-function createAgentTestSeed(depth: number): string {
+export function createAgentTestSeed(depth: number): string {
   return `agent-arena:${new Date().toISOString().slice(0, 10)}:${depth}`;
 }
 

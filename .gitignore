@@ -4,7 +4,8 @@ datasets/processed/*
 datasets/processed_old/*
 datasets/processed_no_expitau/*
 datasets/enriched/*
-runs/
+# Training outputs (only the repo-root runs/ dir, not e.g. app routes named "runs")
+/runs/
 DS_Store
 .DS_Store
 secrets/*

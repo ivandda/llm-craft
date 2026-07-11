@@ -115,6 +115,16 @@ export type AgentTestReport = {
   errorMessage?: string;
 };
 
+export type AgentRunSummary = {
+  id: string;
+  model: string;
+  success: boolean;
+  stopReason: string;
+  combinationsUsed: number;
+  createdAt: string;
+  report: AgentTestReport;
+};
+
 export type AgentRankingEntry = {
   model: string;
   runs: number;

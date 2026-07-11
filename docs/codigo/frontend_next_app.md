@@ -70,8 +70,9 @@ Los endpoints viven bajo `apps/web/app/api`:
 * `GET /api/auth/me`
 * `POST /api/combine`
 * `POST /api/goals/random`
-* `POST /api/agent-test/run`
+* `GET /api/agent-test/runs` (feed publico del arena: goal del dia + corridas recientes)
 * `GET /api/agent-test/rankings`
+* `POST /api/admin/arena/run` (solo admin: correr un modelo contra el goal del dia)
 * `POST /api/dpo/candidates`
 * `POST /api/dpo/preferences`
 * `GET /api/leaderboard`
@@ -101,6 +102,10 @@ Para una prueba manual minima:
 7. En `Goal`, usar `Reset` para reiniciar la meta actual y `New goal` para generar otra meta desde cero.
 8. Entrar a `Agent Test`, elegir profundidad 2 y revisar que el limite del reporte sea 20.
 9. Con `Help train the AI` activo (default), combinar un par con alternativas reales y elegir una salida.
+
+## LLM Arena
+
+El modo `Agent Test` del frontend es un **arena de solo lectura**: muestra el desafio del dia (mismo goal determinista por profundidad para todos los modelos), un podio por win rate, y las corridas recientes con el camino paso a paso de cada modelo (reproducible con playback). Las corridas se disparan **solo desde `/admin`** (seccion "LLM Arena", boton que corre los modelos en secuencia contra el goal del dia) porque cada corrida consume llamadas reales al planner; los resultados quedan publicos en `agent_runs`.
 
 ## Dashboard admin y deploy
 

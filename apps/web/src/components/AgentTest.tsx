@@ -1,29 +1,34 @@
 "use client";
 
-import { requestAgentRankings, requestAgentTestRun } from "@/lib/api";
-import {
-  AGENT_MODEL_OPTIONS,
-  DEFAULT_AGENT_MODEL,
-  getAgentModelLabel
-} from "@/lib/agentModels";
+import { requestAgentRankings, requestArenaFeed } from "@/lib/api";
+import { getAgentModelLabel } from "@/lib/agentModels";
 import { buildAgentPlaybackInventory } from "@/lib/agentPlayback";
 import { getHueForConcept } from "@/lib/emoji";
-import type { AgentRankingEntry, AgentTestReport, AuthUser } from "@/lib/types";
+import { BackButton } from "@/components/BackButton";
+import { ThemeToggle } from "@/components/ThemeToggle";
+import type {
+  AgentRankingEntry,
+  AgentRunSummary,
+  AgentTestReport,
+  AuthUser,
+  GoalPreset
+} from "@/lib/types";
 import {
-  ArrowLeft,
-  Bot,
+  Check,
   LogOut,
   Pause,
   Play,
   RotateCcw,
-  SkipForward
+  SkipForward,
+  Swords,
+  Target,
+  X
 } from "lucide-react";
 import {
   type CSSProperties,
   type ReactNode,
   useEffect,
   useMemo,
-  useRef,
   useState
 } from "react";
 
@@ -32,6 +37,9 @@ const PLAYBACK_SPEEDS = [
   { label: "Normal", value: 900 },
   { label: "Fast", value: 450 }
 ];
+
+const FEED_REFRESH_MS = 30_000;
+const PODIUM_MEDALS = ["🥇", "🥈", "🥉"];
 
 export function AgentTest({
   goalDepth,
@@ -46,15 +54,18 @@ export function AgentTest({
   onGoalDepthChange: (depth: number) => void;
   onLogout: () => void;
 }) {
-  const [report, setReport] = useState<AgentTestReport | null>(null);
+  const [goal, setGoal] = useState<GoalPreset | null>(null);
+  const [runs, setRuns] = useState<AgentRunSummary[]>([]);
+  const [rankings, setRankings] = useState<AgentRankingEntry[]>([]);
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const [isLoadingFeed, setIsLoadingFeed] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [isRunning, setIsRunning] = useState(false);
   const [playbackIndex, setPlaybackIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackSpeedMs, setPlaybackSpeedMs] = useState(900);
-  const [selectedModel, setSelectedModel] = useState(DEFAULT_AGENT_MODEL);
-  const [rankings, setRankings] = useState<AgentRankingEntry[]>([]);
-  const activeRunId = useRef(0);
+
+  const selectedRun = runs.find((run) => run.id === selectedRunId) ?? null;
+  const report = selectedRun?.report ?? null;
   const totalSteps = report?.steps.length ?? 0;
   const isPlaybackComplete = Boolean(report && playbackIndex >= totalSteps);
   const visibleSteps = report?.steps.slice(0, playbackIndex) ?? [];
@@ -69,6 +80,48 @@ export function AgentTest({
         : [],
     [playbackIndex, report]
   );
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadFeed(showSpinner: boolean) {
+      if (showSpinner) {
+        setIsLoadingFeed(true);
+      }
+
+      try {
+        const [feed, rankingEntries] = await Promise.all([
+          requestArenaFeed(goalDepth),
+          requestAgentRankings(goalDepth)
+        ]);
+
+        if (cancelled) {
+          return;
+        }
+
+        setGoal(feed.goal);
+        setRuns(feed.runs);
+        setRankings(rankingEntries);
+        setErrorMessage(null);
+      } catch {
+        if (!cancelled) {
+          setErrorMessage("Could not load the arena. Retrying shortly.");
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoadingFeed(false);
+        }
+      }
+    }
+
+    void loadFeed(true);
+    const timer = window.setInterval(() => void loadFeed(false), FEED_REFRESH_MS);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [goalDepth]);
 
   useEffect(() => {
     if (!report || !isPlaying || playbackIndex >= report.steps.length) {
@@ -90,57 +143,17 @@ export function AgentTest({
     }
   }, [playbackIndex, report]);
 
-  useEffect(() => {
-    let cancelled = false;
+  function selectRun(run: AgentRunSummary) {
+    setSelectedRunId(run.id);
+    setPlaybackIndex(0);
+    setIsPlaying(run.report.steps.length > 0);
+  }
 
-    requestAgentRankings(goalDepth)
-      .then((entries) => {
-        if (!cancelled) {
-          setRankings(entries);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setRankings([]);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [goalDepth, report]);
-
-  async function runTest() {
-    const runId = activeRunId.current + 1;
-    activeRunId.current = runId;
-    setIsRunning(true);
-    setErrorMessage(null);
+  function changeGoalDepth(depth: number) {
+    setSelectedRunId(null);
     setIsPlaying(false);
     setPlaybackIndex(0);
-    setReport(null);
-
-    try {
-      const nextReport = await requestAgentTestRun({
-        depth: goalDepth,
-        model: selectedModel
-      });
-      if (activeRunId.current !== runId) {
-        return;
-      }
-
-      setReport(nextReport);
-      setIsPlaying(nextReport.steps.length > 0);
-    } catch {
-      if (activeRunId.current !== runId) {
-        return;
-      }
-
-      setErrorMessage("Agent test could not be completed.");
-    } finally {
-      if (activeRunId.current === runId) {
-        setIsRunning(false);
-      }
-    }
+    onGoalDepthChange(depth);
   }
 
   function restartPlayback() {
@@ -171,35 +184,23 @@ export function AgentTest({
     setIsPlaying((currentValue) => !currentValue);
   }
 
-  function changeGoalDepth(depth: number) {
-    activeRunId.current += 1;
-    setIsPlaying(false);
-    setPlaybackIndex(0);
-    onGoalDepthChange(depth);
-  }
-
-  function changeModel(model: string) {
-    activeRunId.current += 1;
-    setIsPlaying(false);
-    setPlaybackIndex(0);
-    setSelectedModel(model);
-  }
-
   return (
     <main className="min-h-[100dvh] bg-paper px-4 py-6 text-ink">
       <div className="mx-auto grid max-w-6xl gap-5">
         <header className="flex flex-wrap items-center justify-between gap-3 border-b border-linen pb-4">
           <div>
             <h1 className="flex items-center gap-2 font-display text-xl font-semibold tracking-normal">
-              <Bot size={20} />
-              Agent Test
+              <Swords size={20} />
+              LLM Arena
             </h1>
-            <p className="mt-1 text-sm text-soot">{user.displayName}</p>
+            <p className="mt-1 text-sm text-soot">
+              Each model faces the same daily crafting goal. Watch how they
+              reason their way to it — or fail trying.
+            </p>
           </div>
           <div className="flex items-center gap-2">
-            <IconButton label="Back to modes" onClick={onBackToMenu}>
-              <ArrowLeft size={17} />
-            </IconButton>
+            <BackButton label="Modes" onClick={onBackToMenu} />
+            <ThemeToggle />
             <IconButton label="Log out" onClick={onLogout}>
               <LogOut size={17} />
             </IconButton>
@@ -212,7 +213,6 @@ export function AgentTest({
               <span>Goal depth</span>
               <select
                 className="h-10 rounded-md border border-linen bg-surface px-3 text-sm outline-none transition focus:border-cobalt"
-                disabled={isRunning}
                 onChange={(event) => changeGoalDepth(Number(event.target.value))}
                 value={goalDepth}
               >
@@ -224,31 +224,13 @@ export function AgentTest({
               </select>
             </label>
 
-            <label className="mt-4 grid gap-2 text-sm font-semibold text-ink">
-              <span>Agent model</span>
-              <select
-                className="h-10 rounded-md border border-linen bg-surface px-3 font-mono text-sm outline-none transition focus:border-cobalt"
-                disabled={isRunning}
-                onChange={(event) => changeModel(event.target.value)}
-                value={selectedModel}
-              >
-                {AGENT_MODEL_OPTIONS.map((model) => (
-                  <option key={model.id} value={model.id}>
-                    {model.label}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <TodaysChallenge goal={goal} />
+            <Podium entries={rankings} />
 
-            <button
-              className="mt-4 flex h-10 w-full items-center justify-center gap-2 rounded-md bg-cobalt px-3 text-sm font-semibold text-white transition hover:bg-cobalt-deep disabled:cursor-not-allowed disabled:opacity-60"
-              disabled={isRunning}
-              onClick={() => void runTest()}
-              type="button"
-            >
-              {report ? <RotateCcw size={16} /> : <Play size={16} />}
-              {isRunning ? "Running" : report ? "Run again" : "Run test"}
-            </button>
+            <p className="mt-4 rounded-md border border-linen bg-paper px-3 py-2 text-xs text-soot">
+              Runs are triggered by the admins to keep model costs in check —
+              every result is public and updates here live.
+            </p>
 
             {errorMessage ? (
               <p className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
@@ -256,9 +238,6 @@ export function AgentTest({
               </p>
             ) : null}
 
-            <ArenaRanking depth={goalDepth} entries={rankings} />
-
-            {report ? <ReportMetrics report={report} /> : null}
             {report ? (
               <PlaybackControls
                 isComplete={isPlaybackComplete}
@@ -275,39 +254,169 @@ export function AgentTest({
           </aside>
 
           <section className="min-h-[520px] rounded-md border border-linen bg-surface p-5 shadow-hairline">
-            {!report && isRunning ? (
-              <div className="grid h-full place-items-center text-sm text-soot">
-                Running agent test.
-              </div>
-            ) : null}
+            <RecentRuns
+              isLoading={isLoadingFeed}
+              runs={runs}
+              selectedRunId={selectedRunId}
+              onSelect={selectRun}
+            />
 
-            {!report && !isRunning ? (
-              <div className="grid h-full place-items-center text-center">
+            {report ? (
+              <div className="mt-5 border-t border-linen pt-5">
+                <ReportDetails
+                  inventory={visibleInventory}
+                  isPlaybackComplete={isPlaybackComplete}
+                  playbackIndex={playbackIndex}
+                  report={report}
+                  visibleSteps={visibleSteps}
+                />
+              </div>
+            ) : (
+              <div className="mt-10 grid place-items-center text-center">
                 <div>
                   <div className="mx-auto grid size-16 place-items-center rounded-md border border-linen bg-paper text-soot">
-                    <Bot size={28} />
+                    <Swords size={28} />
                   </div>
-                  <h2 className="mt-4 font-display text-lg font-semibold">Agent ready</h2>
+                  <h2 className="mt-4 font-display text-lg font-semibold">
+                    Pick a run to replay it
+                  </h2>
                   <p className="mt-2 max-w-sm text-sm text-soot">
-                    Choose a depth and model, then run the test to generate a goal.
+                    Select any run above to watch the model&apos;s path step by
+                    step: which pairs it combined, and why.
                   </p>
                 </div>
               </div>
-            ) : null}
-
-            {report ? (
-              <ReportDetails
-                inventory={visibleInventory}
-                isPlaybackComplete={isPlaybackComplete}
-                playbackIndex={playbackIndex}
-                report={report}
-                visibleSteps={visibleSteps}
-              />
-            ) : null}
+            )}
           </section>
         </section>
       </div>
     </main>
+  );
+}
+
+function TodaysChallenge({ goal }: { goal: GoalPreset | null }) {
+  return (
+    <div className="mt-5 rounded-md border border-linen bg-paper p-3">
+      <p className="flex items-center gap-1.5 font-mono text-xs font-semibold uppercase tracking-wider text-soot">
+        <Target size={13} />
+        Today&apos;s challenge
+      </p>
+      {goal ? (
+        <>
+          <div className="mt-2">
+            <ElementPill name={goal.target.name} emoji={goal.target.emoji} />
+          </div>
+          <p className="mt-2 text-xs text-soot">
+            Doable in {goal.metadata.minDepth ?? goal.metadata.depth} steps ·
+            starting from {goal.initialInventory.length} elements · same goal
+            for every model today.
+          </p>
+        </>
+      ) : (
+        <p className="mt-2 text-xs text-soot">Loading…</p>
+      )}
+    </div>
+  );
+}
+
+function Podium({ entries }: { entries: AgentRankingEntry[] }) {
+  return (
+    <div className="mt-4 rounded-md border border-linen bg-paper p-3">
+      <p className="font-mono text-xs font-semibold uppercase tracking-wider text-soot">
+        Ranking · this depth
+      </p>
+      {entries.length === 0 ? (
+        <p className="mt-2 text-xs text-soot">
+          No runs recorded at this depth yet.
+        </p>
+      ) : (
+        <div className="mt-2 grid gap-2">
+          {entries.map((entry, index) => (
+            <div
+              className="flex items-center justify-between gap-2 rounded-md border border-linen bg-surface px-2.5 py-2"
+              key={entry.model}
+            >
+              <span className="flex min-w-0 items-center gap-2 text-sm">
+                <span aria-hidden>{PODIUM_MEDALS[index] ?? "·"}</span>
+                <span className="truncate font-medium">
+                  {getAgentModelLabel(entry.model)}
+                </span>
+              </span>
+              <span className="shrink-0 text-right font-mono text-xs text-soot">
+                <span className="block text-sm font-semibold text-ink">
+                  {Math.round(entry.winRate * 100)}%
+                </span>
+                {entry.wins}/{entry.runs} wins
+                {entry.avgCombinations !== null
+                  ? ` · ${entry.avgCombinations.toFixed(1)} avg`
+                  : ""}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RecentRuns({
+  isLoading,
+  runs,
+  selectedRunId,
+  onSelect
+}: {
+  isLoading: boolean;
+  runs: AgentRunSummary[];
+  selectedRunId: string | null;
+  onSelect: (run: AgentRunSummary) => void;
+}) {
+  return (
+    <div>
+      <h3 className="font-mono text-xs font-semibold uppercase tracking-wider text-soot">
+        Recent runs
+      </h3>
+      {isLoading && runs.length === 0 ? (
+        <p className="mt-3 text-sm text-soot">Loading runs…</p>
+      ) : runs.length === 0 ? (
+        <p className="mt-3 rounded-md border border-dashed border-linen p-3 text-sm text-soot">
+          No runs at this depth yet — check back after the next arena session,
+          or try another depth.
+        </p>
+      ) : (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {runs.map((run) => (
+            <button
+              className={`flex items-center gap-2 rounded-md border px-3 py-2 text-left text-sm transition ${
+                run.id === selectedRunId
+                  ? "border-cobalt bg-cobalt/5"
+                  : "border-linen bg-paper hover:border-cobalt/50"
+              }`}
+              key={run.id}
+              onClick={() => onSelect(run)}
+              type="button"
+            >
+              <span
+                className={`grid size-5 shrink-0 place-items-center rounded-full ${
+                  run.success
+                    ? "bg-emerald-100 text-emerald-700"
+                    : "bg-red-100 text-red-600"
+                }`}
+              >
+                {run.success ? <Check size={12} /> : <X size={12} />}
+              </span>
+              <span className="min-w-0">
+                <span className="block truncate font-medium">
+                  {getAgentModelLabel(run.model)}
+                </span>
+                <span className="block font-mono text-xs text-soot">
+                  {run.combinationsUsed} moves · {formatTimeAgo(run.createdAt)}
+                </span>
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -381,67 +490,6 @@ function PlaybackControls({
   );
 }
 
-function ArenaRanking({
-  depth,
-  entries
-}: {
-  depth: number;
-  entries: AgentRankingEntry[];
-}) {
-  return (
-    <div className="mt-5 rounded-md border border-linen bg-paper p-3">
-      <p className="font-mono text-xs font-semibold uppercase tracking-wider text-soot">
-        Arena ranking · depth {depth}
-      </p>
-      {entries.length === 0 ? (
-        <p className="mt-2 text-xs text-soot">
-          No runs recorded at this depth yet. Every run counts toward the
-          ranking.
-        </p>
-      ) : (
-        <div className="mt-2 grid gap-1.5">
-          {entries.map((entry, index) => (
-            <div
-              className="flex items-center justify-between gap-2 text-xs"
-              key={entry.model}
-            >
-              <span className="truncate">
-                <span className="font-mono font-semibold text-soot">
-                  {index + 1}.
-                </span>{" "}
-                {getAgentModelLabel(entry.model)}
-              </span>
-              <span className="shrink-0 font-mono text-soot">
-                {Math.round(entry.winRate * 100)}% · {entry.wins}/{entry.runs}
-                {entry.avgCombinations !== null
-                  ? ` · ${entry.avgCombinations.toFixed(1)} avg`
-                  : ""}
-              </span>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ReportMetrics({ report }: { report: AgentTestReport }) {
-  return (
-    <div className="mt-5 grid grid-cols-2 gap-3">
-      <MetricCard label="Min depth" value={report.minDepth} />
-      <MetricCard label="Limit" value={report.maxCombinations} />
-      <MetricCard label="Used" value={report.combinationsUsed} />
-      <MetricCard label="Status" value={report.success ? "Pass" : "Fail"} />
-      <div className="col-span-2 rounded-md border border-linen bg-paper p-3">
-        <p className="truncate font-mono text-sm font-semibold">
-          {getAgentModelLabel(report.model)}
-        </p>
-        <p className="mt-1 font-mono text-xs uppercase tracking-wider text-soot">Agent model</p>
-      </div>
-    </div>
-  );
-}
-
 function ReportDetails({
   inventory,
   isPlaybackComplete,
@@ -460,7 +508,9 @@ function ReportDetails({
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex min-w-0 flex-wrap items-start gap-6">
           <div>
-            <p className="font-mono text-xs font-semibold uppercase tracking-wider text-soot">Target</p>
+            <p className="font-mono text-xs font-semibold uppercase tracking-wider text-soot">
+              {getAgentModelLabel(report.model)} · target
+            </p>
             <h2 className="mt-1 font-display text-3xl font-semibold capitalize tracking-normal">
               {report.goal.target.emoji ? `${report.goal.target.emoji} ` : ""}
               {report.goal.target.name}
@@ -490,7 +540,7 @@ function ReportDetails({
             {formatStopReason(report.stopReason)}
           </span>
         ) : (
-          <span className="rounded-md border border-cobalt/30 bg-cobalt/5 px-3 py-2 font-mono text-sm font-semibold text-cobalt">
+          <span className="rounded-md border border-cobalt/30 bg-cobalt/5 px-3 py-2 font-mono text-sm font-semibold text-accent">
             Replaying {playbackIndex}/{report.steps.length}
           </span>
         )}
@@ -565,15 +615,6 @@ function ElementPill({ emoji, name }: { emoji?: string; name: string }) {
   );
 }
 
-function MetricCard({ label, value }: { label: string; value: number | string }) {
-  return (
-    <div className="rounded-md border border-linen bg-paper p-3">
-      <p className="font-mono text-2xl font-semibold">{value}</p>
-      <p className="mt-1 font-mono text-xs uppercase tracking-wider text-soot">{label}</p>
-    </div>
-  );
-}
-
 function IconButton({
   children,
   disabled = false,
@@ -601,4 +642,25 @@ function IconButton({
 
 function formatStopReason(reason: AgentTestReport["stopReason"]): string {
   return reason.replace(/_/g, " ");
+}
+
+function formatTimeAgo(isoDate: string): string {
+  const elapsedMs = Date.now() - new Date(isoDate).getTime();
+  const minutes = Math.floor(elapsedMs / 60_000);
+
+  if (minutes < 1) {
+    return "just now";
+  }
+
+  if (minutes < 60) {
+    return `${minutes}m ago`;
+  }
+
+  const hours = Math.floor(minutes / 60);
+
+  if (hours < 24) {
+    return `${hours}h ago`;
+  }
+
+  return `${Math.floor(hours / 24)}d ago`;
 }
