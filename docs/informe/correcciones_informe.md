@@ -1,6 +1,5 @@
 # Correcciones a aplicar en el informe LaTeX (`acl_latex.tex`)
 
-**Fecha:** 2026-07-11 · **Para:** el equipo que edita el informe (Overleaf / LaTeX).
 
 Cada dato numérico y cada afirmación metodológica del informe se verificó contra el repo
 (configs de entrenamiento, código de `src/`, los `datasets/final-10k/*.jsonl`,
@@ -71,28 +70,7 @@ exploratorio (no verifica corrección), tal como ya aclara el texto de esa subse
 
 ---
 
-## 4. Verificado correcto — no tocar
-
-- **Tabla 1 (datasets).** Recalculado desde los `.jsonl`: Train 10 165 / 36 837 / 3.62 /
-  10 249 / 26 588; Dev 1 291 / 4 634 / 3.59 / 1 297 / 3 337; Test 1 263 / 4 561 / 3.61 /
-  1 263 / 3 298. **Exacto.**
-- **SFT.** `length_normalize_concept_logprob: true` en la config ganadora → la afirmación de
-  log-prob normalizado por longitud es **correcta**. También 3 épocas, lr `2e-4`, `r=16`,
-  `max_seq_length=512`, `grad_accum=1`.
-- **Ec. (10), pesos por rango recíproco** `w = ρ⁻¹ / Σ ρ⁻¹`: coincide con
-  `weight_fallback: inverse_rank` (los candidatos no traen `weight` explícito). **Correcto.**
-- **Juez LLM — todos los porcentajes verifican** (`docs/resultados.md` §3.5): Soft-CE
-  83.3 / 16.7 / 29.7 / 53.6, any@k 96.8; Concept-set 75.7 / 24.3 / 23.9 / 51.8; DPO
-  95.5 / 4.5 / 52.1 / 43.4. (Concept-set **sí** fue juzgado.)
-- **DPO:** exact@1 7.3→42.2, sem@1 33.7→52.8, ≤2 palabras 40.9→100, media 1.08, `empty=0`.
-- **Dataset de preferencias:** 2 000 recetas, 6 muestras, 1 999 pares, 1 descartada, 0
-  *chosen* propio corto-válido, 1 999 *chosen* canónico. (Solo el `max_new_tokens` está mal.)
-- **Modelos:** student `Qwen3-4B-Thinking-2507`, teacher `Gemini 2.5 Flash`, juez
-  `Gemini 2.5 Pro`.
-
----
-
-## 5. Menores / opcionales
+## 4. Menores / opcionales
 
 - El cuerpo no dice el **split** de los 1 999 pares (**1 799 train / 200 dev**) ni la **tasa
   de DPO** (`5e-5`) ni `β=0.1` en §3.1 — se pueden agregar por reproducibilidad.
