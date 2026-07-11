@@ -263,7 +263,7 @@ export function AppShell() {
 
 function LoadingScreen() {
   return (
-    <main className="grid min-h-screen place-items-center bg-paper px-6 text-ink">
+    <main className="grid min-h-[100dvh] place-items-center bg-paper px-6 text-ink">
       <div className="rounded-md border border-linen bg-surface px-5 py-4 text-sm text-soot shadow-hairline">
         Setting up your workbench…
       </div>
@@ -324,7 +324,7 @@ function AuthPanel({
   }
 
   return (
-    <main className="grid min-h-screen place-items-center bg-paper px-4 py-8 text-ink">
+    <main className="grid min-h-[100dvh] place-items-center bg-paper px-4 py-8 text-ink">
       <form
         className="w-full max-w-sm rounded-md border border-linen bg-surface p-5 shadow-lift"
         onSubmit={handleSubmit}
@@ -435,8 +435,8 @@ function ModeMenu({
   onSignIn?: () => void;
 }) {
   return (
-    <main className="min-h-screen bg-paper px-4 py-6 text-ink">
-      <div className="mx-auto flex min-h-[calc(100vh-3rem)] max-w-6xl flex-col gap-5">
+    <main className="min-h-[100dvh] bg-paper px-4 py-6 text-ink">
+      <div className="mx-auto flex min-h-[calc(100dvh-3rem)] max-w-6xl flex-col gap-5">
         <header className="flex flex-wrap items-center justify-between gap-3 border-b border-linen pb-4">
           <div>
             <h1>
@@ -589,7 +589,7 @@ function ModeCard({
 }) {
   return (
     <button
-      className="element-card group relative min-h-[360px] overflow-hidden rounded-md border-2 p-5 text-left shadow-hairline transition duration-200 hover:-translate-y-1 hover:shadow-lift active:translate-y-0"
+      className="element-card group relative min-h-[280px] overflow-hidden rounded-md border-2 p-5 text-left shadow-hairline transition duration-200 hover:-translate-y-1 hover:shadow-lift active:translate-y-0 sm:min-h-[360px]"
       disabled={disabled}
       onClick={onClick}
       style={{ "--el-hue": hue } as CSSProperties}
@@ -731,7 +731,7 @@ function ProfileView({
   }
 
   return (
-    <main className="min-h-screen bg-paper px-4 py-6 text-ink">
+    <main className="min-h-[100dvh] bg-paper px-4 py-6 text-ink">
       <div className="mx-auto grid max-w-5xl gap-5">
         <header className="flex flex-wrap items-center justify-between gap-3 border-b border-linen pb-4">
           <div>

@@ -96,7 +96,7 @@ export default function AdminDashboardPage() {
     vm !== null && !["RUNNING", "TERMINATED"].includes(vm.status);
 
   return (
-    <main className="min-h-screen bg-paper px-4 py-8 text-ink">
+    <main className="min-h-[100dvh] bg-paper px-4 py-8 text-ink">
       <div className="mx-auto max-w-2xl">
         <header className="flex items-center justify-between border-b border-linen pb-4">
           <div>
