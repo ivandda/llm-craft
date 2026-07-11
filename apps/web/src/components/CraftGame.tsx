@@ -29,6 +29,7 @@ import {
   Clock,
   Combine,
   LayoutGrid,
+  Loader2,
   LogOut,
   Maximize,
   Minus,
@@ -745,7 +746,8 @@ export function CraftGame({
     return clampBoardPosition(
       point.x - TOKEN_WIDTH / 2,
       point.y - TOKEN_HEIGHT / 2,
-      rect
+      rect,
+      view
     );
   }
 
@@ -762,7 +764,8 @@ export function CraftGame({
     return clampBoardPosition(
       center.x - TOKEN_WIDTH / 2 + (Math.random() - 0.5) * 120,
       center.y - TOKEN_HEIGHT / 2 + (Math.random() - 0.5) * 120,
-      rect
+      rect,
+      view
     );
   }
 
@@ -777,7 +780,8 @@ export function CraftGame({
     const position = clampBoardPosition(
       point.x + RESULT_OFFSET,
       point.y + RESULT_OFFSET,
-      rect
+      rect,
+      view
     );
 
     return [position.x, position.y];
@@ -795,7 +799,8 @@ export function CraftGame({
     const position = clampBoardPosition(
       (clientX - rect.left - view.x - dragState.offsetX) / view.scale,
       (clientY - rect.top - view.y - dragState.offsetY) / view.scale,
-      rect
+      rect,
+      view
     );
 
     setBoardElements((currentElements) =>
@@ -1466,11 +1471,9 @@ export function CraftGame({
             </div>
           ) : null}
 
-          <StatusToast
-            errorMessage={errorMessage}
-            isCombining={isCombining}
-            result={result}
-          />
+          <CraftingIndicator isCombining={isCombining} />
+
+          <StatusToast errorMessage={errorMessage} result={result} />
 
           {discovery ? (
             <div className="pointer-events-none absolute inset-x-0 top-20 z-40 flex justify-center">
@@ -1923,17 +1926,17 @@ function GoalBanner({
 }) {
   return (
     <div className="pointer-events-none absolute left-1/2 top-[4.75rem] z-20 max-w-[calc(100%-2rem)] -translate-x-1/2 md:top-4">
-      <div className="flex items-center gap-2.5 rounded-md border border-linen bg-surface/95 px-3 py-2 shadow-hairline backdrop-blur">
+      <div className="flex flex-wrap items-center justify-center gap-x-2.5 gap-y-1 rounded-md border border-linen bg-surface/95 px-3 py-2 shadow-hairline backdrop-blur">
         <Target className="shrink-0 text-accent" size={14} />
         <span className="font-mono text-xs font-semibold uppercase tracking-wider text-soot">
           Craft
         </span>
         <span
-          className="element-card flex items-center gap-1.5 rounded-md border px-2 py-1 text-sm font-semibold capitalize"
+          className="element-card flex min-w-0 items-center gap-1.5 rounded-md border px-2 py-1 text-sm font-semibold capitalize"
           style={{ "--el-hue": getHueForConcept(target.name) } as CSSProperties}
         >
-          <span>{target.emoji ?? "·"}</span>
-          <span className="max-w-36 truncate">{target.name}</span>
+          <span className="shrink-0">{target.emoji ?? "·"}</span>
+          <span className="truncate">{target.name}</span>
         </span>
         <span className="shrink-0 font-mono text-xs text-soot">
           {isComplete
@@ -2262,16 +2265,32 @@ function DragPreview({
   );
 }
 
+// A prominent, centred "the model is thinking" cue. The bottom-left status pill
+// alone was easy to miss, so combining surfaces this animated chip in the zone
+// players actually watch — kept compact so it never blocks the board.
+function CraftingIndicator({ isCombining }: { isCombining: boolean }) {
+  if (!isCombining) {
+    return null;
+  }
+
+  return (
+    <div className="pointer-events-none absolute inset-x-0 top-28 z-40 flex justify-center md:top-20">
+      <div className="craft-indicator flex items-center gap-2.5 rounded-full border border-cobalt/40 bg-surface/95 px-4 py-2 shadow-lift backdrop-blur">
+        <Loader2 className="animate-spin text-cobalt" size={16} />
+        <span className="text-sm font-semibold text-ink">Crafting…</span>
+      </div>
+    </div>
+  );
+}
+
 function StatusToast({
   errorMessage,
-  isCombining,
   result
 }: {
   errorMessage: string | null;
-  isCombining: boolean;
   result: CombineResponse | null;
 }) {
-  if (!errorMessage && !isCombining && !result) {
+  if (!errorMessage && !result) {
     return null;
   }
 
@@ -2281,8 +2300,6 @@ function StatusToast({
     >
       {errorMessage ? (
         <p className="text-sm text-soot">{errorMessage}</p>
-      ) : isCombining ? (
-        <p className="text-sm text-soot">Resolving combination…</p>
       ) : result ? (
         <>
           <span className="text-base">{result.result.emoji ?? "·"}</span>
@@ -2291,9 +2308,6 @@ function StatusToast({
           </span>
           <span className="ml-auto shrink-0 rounded border border-linen bg-paper px-1.5 py-0.5 font-mono text-[11px] text-soot">
             {formatCombineSource(result.source)}
-            {typeof result.confidence === "number"
-              ? ` · ${Math.round(result.confidence * 100)}%`
-              : ""}
           </span>
         </>
       ) : null}
@@ -2346,14 +2360,28 @@ function createBoardElement(
   };
 }
 
+const IDENTITY_VIEW: BoardView = { scale: 1, x: 0, y: 0 };
+
+// Keep a token within the *currently visible* board region. The token layer is
+// translated by (view.x, view.y) and scaled by view.scale, so the visible slice
+// in board coordinates grows as you zoom out and shifts as you pan — clamping to
+// the raw pixel rect would strand tokens in the top-left and block dragging to
+// the right once zoomed out. Defaults to the identity transform for callers that
+// don't (or can't) thread the live view.
 function clampBoardPosition(
   x: number,
   y: number,
-  rect: DOMRect
+  rect: DOMRect,
+  view: BoardView = IDENTITY_VIEW
 ): { x: number; y: number } {
+  const minX = -view.x / view.scale;
+  const minY = -view.y / view.scale;
+  const maxX = (rect.width - view.x) / view.scale - TOKEN_WIDTH;
+  const maxY = (rect.height - view.y) / view.scale - TOKEN_HEIGHT;
+
   return {
-    x: Math.max(0, Math.min(x, rect.width - TOKEN_WIDTH)),
-    y: Math.max(0, Math.min(y, rect.height - TOKEN_HEIGHT))
+    x: Math.max(minX, Math.min(x, maxX)),
+    y: Math.max(minY, Math.min(y, maxY))
   };
 }
 
