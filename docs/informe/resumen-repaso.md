@@ -1,4 +1,10 @@
-﻿Métricas
+﻿> ⚠️ **Notas de brainstorm — ANTEPROYECTO.** No refleja la implementación final. En
+> particular, el esquema de `chosen output / near negative / easy negative / preference_pairs`
+> que aparece abajo **nunca se construyó**: el dataset final solo tiene candidatos válidos
+> (`observed`/`teacher`) y el DPO se armó on-policy por reglas. Ver `docs/resultados.md` y
+> `docs/informe/correcciones_informe.md`.
+
+Métricas
 Métricas
 
 
