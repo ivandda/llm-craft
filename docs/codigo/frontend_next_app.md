@@ -77,6 +77,7 @@ Los endpoints viven bajo `apps/web/app/api`:
 * `GET /api/leaderboard`
 * `POST /api/leaderboard`
 * `PATCH /api/profile`
+* `GET /api/admin/vm` / `POST /api/admin/vm` (solo admin)
 
 Los tipos compartidos estan en `apps/web/src/lib/types.ts`. La combinacion de elementos usa `recipe_pairs` y `recipe_candidates`: primero busca en `final-10k`, luego en el dataset generado del modelo elegido y, solo para `gemini-2.5-flash`, en `web-generated` legacy. Si no encuentra el par, llama a Vertex desde el servidor, valida JSON y persiste la salida nueva en el dataset generado de ese modelo. Las metas aleatorias usan recetas importadas de `final-10k`.
 
@@ -100,6 +101,16 @@ Para una prueba manual minima:
 7. En `Goal`, usar `Reset` para reiniciar la meta actual y `New goal` para generar otra meta desde cero.
 8. Entrar a `Agent Test`, elegir profundidad 2 y revisar que el limite del reporte sea 20.
 9. Con `Help train the AI` activo (default), combinar un par con alternativas reales y elegir una salida.
+
+## Dashboard admin y deploy
+
+`/admin` es un panel operativo para prender/apagar la VM GPU del modelo (estado, botones start/stop y links directos a la consola de GCP). Esta protegido con HTTP Basic auth via `apps/web/proxy.ts` usando `ADMIN_DASH_USER` / `ADMIN_DASH_PASSWORD` del entorno; si esas variables no estan definidas, `/admin` devuelve 404. El backend (`/api/admin/vm`, `src/lib/server/gcpVm.ts`) llama a la API de Compute Engine con las mismas credenciales de Google que usa Vertex (service account local o metadata server en Cloud Run). La VM objetivo se configura con `QWEN_VM_NAME` / `QWEN_VM_ZONE`.
+
+Deploy:
+
+* Manual: `DATABASE_URL=... ADMIN_DASH_USER=... ADMIN_DASH_PASSWORD=... ./scripts/gcp/deploy_web_cloudrun.sh` (construye la imagen y setea todas las env vars del servicio).
+* CI/CD: `cloudbuild.web.yaml` en la raiz del repo reconstruye la imagen y actualiza Cloud Run **sin tocar env vars** en cada push (requiere crear el trigger de Cloud Build conectado a GitHub; el comando exacto esta comentado en el YAML).
+* GPU on/off por CLI: `./scripts/gcp/model_vm.sh start|stop|status`.
 
 ## Integracion futura con SFT
 

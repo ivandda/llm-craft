@@ -633,6 +633,8 @@ npm run test
 npm run build
 ```
 
+Hosting: la app corre en Cloud Run (deploy manual con `scripts/gcp/deploy_web_cloudrun.sh`, redeploys automaticos por push con `cloudbuild.web.yaml`), la base en Neon y el modelo Qwen en una VM GPU que se prende solo para demos (`scripts/gcp/model_vm.sh` o el panel `/admin` protegido con `ADMIN_DASH_USER`/`ADMIN_DASH_PASSWORD`); con la VM apagada el juego sigue funcionando con Gemini.
+
 Más detalles: [frontend_next_app.md](docs/codigo/frontend_next_app.md).
 
 ---
