@@ -1,3 +1,4 @@
+import { getEmojiForConcept } from "@/lib/emoji";
 import type {
   CombineRequest,
   CombineResponse,
@@ -85,7 +86,10 @@ export function createElementToken(name: string, emoji?: string): ElementToken {
   return {
     id: normalizedName,
     name: normalizedName,
-    emoji
+    // Fall back to the concept's mapped emoji so callers that omit one (random
+    // goal presets, targets, the fallback goal) still get a glyph instead of a
+    // bare "·" placeholder on the board.
+    emoji: emoji ?? getEmojiForConcept(normalizedName)
   };
 }
 
