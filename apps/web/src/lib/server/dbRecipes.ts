@@ -99,12 +99,14 @@ export async function buildDpoCandidates(
         ? generateCombinationWithQwen(request, liveModel)
         : generateCombinationWithVertex(request, liveModel)
       ).then(async (response) => {
+        // Persistence is best-effort: a failed save must not discard an
+        // otherwise-valid generation from the candidate set the user is shown.
         await saveGeneratedRecipe(
           request,
           response,
           liveModel,
           getGenerationSource(liveModel)
-        );
+        ).catch(() => undefined);
         return { response, liveModel };
       })
     )

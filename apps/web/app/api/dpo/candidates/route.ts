@@ -40,8 +40,18 @@ export async function POST(request: Request) {
     return rateLimited;
   }
 
-  return NextResponse.json(await buildDpoCandidates(payload));
+  // Cap the inventory sent to the model, mirroring the combine route: the
+  // request allows up to 600 items, but only the most recent matter for
+  // generation and the full list inflates prompt token cost/latency.
+  return NextResponse.json(
+    await buildDpoCandidates({
+      ...payload,
+      inventory: payload.inventory.slice(-MAX_INVENTORY_FOR_MODEL)
+    })
+  );
 }
+
+const MAX_INVENTORY_FOR_MODEL = 120;
 
 function isDpoCandidatesRequest(
   value: DpoCandidatesRequest | null
