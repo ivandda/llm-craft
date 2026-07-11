@@ -1,7 +1,7 @@
 import type {
   AuthUser,
-  AgentRankingEntry,
   AgentRunSummary,
+  ArenaStats,
   CombineRequest,
   CombineResponse,
   DpoCandidatesRequest,
@@ -52,10 +52,18 @@ export async function requestRandomGoal(
   return payload.goal;
 }
 
+export type ArenaFeed = {
+  day: string;
+  goal: GoalPreset | null;
+  runs: AgentRunSummary[];
+};
+
 export async function requestArenaFeed(
-  depth: number
-): Promise<{ goal: GoalPreset; runs: AgentRunSummary[] }> {
-  const response = await fetch(`/api/agent-test/runs?depth=${depth}`, {
+  depth: number,
+  day?: string
+): Promise<ArenaFeed> {
+  const dayParam = day ? `&day=${encodeURIComponent(day)}` : "";
+  const response = await fetch(`/api/agent-test/runs?depth=${depth}${dayParam}`, {
     cache: "no-store"
   });
 
@@ -63,7 +71,7 @@ export async function requestArenaFeed(
     throw new Error("Arena feed request failed");
   }
 
-  return (await response.json()) as { goal: GoalPreset; runs: AgentRunSummary[] };
+  return (await response.json()) as ArenaFeed;
 }
 
 export async function requestDpoPreference(
@@ -78,19 +86,16 @@ export async function requestDpoCandidates(
   return requestJson("/api/dpo/candidates", request);
 }
 
-export async function requestAgentRankings(
-  depth: number
-): Promise<AgentRankingEntry[]> {
-  const response = await fetch(`/api/agent-test/rankings?depth=${depth}`, {
+export async function requestArenaStats(depth: number): Promise<ArenaStats> {
+  const response = await fetch(`/api/agent-test/stats?depth=${depth}`, {
     cache: "no-store"
   });
 
   if (!response.ok) {
-    throw new Error("Rankings request failed");
+    throw new Error("Arena stats request failed");
   }
 
-  const payload = (await response.json()) as { rankings: AgentRankingEntry[] };
-  return payload.rankings;
+  return (await response.json()) as ArenaStats;
 }
 
 export async function requestCurrentSession(): Promise<AuthSession | null> {
