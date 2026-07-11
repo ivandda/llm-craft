@@ -1,13 +1,14 @@
 "use client";
 
-import { requestAgentTestRun } from "@/lib/api";
+import { requestAgentRankings, requestAgentTestRun } from "@/lib/api";
 import {
   AGENT_MODEL_OPTIONS,
   DEFAULT_AGENT_MODEL,
   getAgentModelLabel
 } from "@/lib/agentModels";
 import { buildAgentPlaybackInventory } from "@/lib/agentPlayback";
-import type { AgentTestReport, AuthUser } from "@/lib/types";
+import { getHueForConcept } from "@/lib/emoji";
+import type { AgentRankingEntry, AgentTestReport, AuthUser } from "@/lib/types";
 import {
   ArrowLeft,
   Bot,
@@ -17,7 +18,14 @@ import {
   RotateCcw,
   SkipForward
 } from "lucide-react";
-import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type CSSProperties,
+  type ReactNode,
+  useEffect,
+  useMemo,
+  useRef,
+  useState
+} from "react";
 
 const PLAYBACK_SPEEDS = [
   { label: "Slow", value: 1400 },
@@ -45,6 +53,7 @@ export function AgentTest({
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackSpeedMs, setPlaybackSpeedMs] = useState(900);
   const [selectedModel, setSelectedModel] = useState(DEFAULT_AGENT_MODEL);
+  const [rankings, setRankings] = useState<AgentRankingEntry[]>([]);
   const activeRunId = useRef(0);
   const totalSteps = report?.steps.length ?? 0;
   const isPlaybackComplete = Boolean(report && playbackIndex >= totalSteps);
@@ -80,6 +89,26 @@ export function AgentTest({
       setIsPlaying(false);
     }
   }, [playbackIndex, report]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    requestAgentRankings(goalDepth)
+      .then((entries) => {
+        if (!cancelled) {
+          setRankings(entries);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setRankings([]);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [goalDepth, report]);
 
   async function runTest() {
     const runId = activeRunId.current + 1;
@@ -157,15 +186,15 @@ export function AgentTest({
   }
 
   return (
-    <main className="min-h-screen bg-stone-100 px-4 py-6 text-zinc-950">
+    <main className="min-h-screen bg-paper px-4 py-6 text-ink">
       <div className="mx-auto grid max-w-6xl gap-5">
-        <header className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-200 pb-4">
+        <header className="flex flex-wrap items-center justify-between gap-3 border-b border-linen pb-4">
           <div>
-            <h1 className="flex items-center gap-2 text-xl font-semibold tracking-normal">
+            <h1 className="flex items-center gap-2 font-display text-xl font-semibold tracking-normal">
               <Bot size={20} />
               Agent Test
             </h1>
-            <p className="mt-1 text-sm text-zinc-500">{user.displayName}</p>
+            <p className="mt-1 text-sm text-soot">{user.displayName}</p>
           </div>
           <div className="flex items-center gap-2">
             <IconButton label="Back to modes" onClick={onBackToMenu}>
@@ -178,11 +207,11 @@ export function AgentTest({
         </header>
 
         <section className="grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
-          <aside className="rounded-md border border-zinc-200 bg-white p-5 shadow-hairline">
-            <label className="grid gap-2 text-sm font-semibold text-zinc-700">
+          <aside className="rounded-md border border-linen bg-surface p-5 shadow-hairline">
+            <label className="grid gap-2 text-sm font-semibold text-ink">
               <span>Goal depth</span>
               <select
-                className="h-10 rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-zinc-500"
+                className="h-10 rounded-md border border-linen bg-surface px-3 text-sm outline-none transition focus:border-cobalt"
                 disabled={isRunning}
                 onChange={(event) => changeGoalDepth(Number(event.target.value))}
                 value={goalDepth}
@@ -195,10 +224,10 @@ export function AgentTest({
               </select>
             </label>
 
-            <label className="mt-4 grid gap-2 text-sm font-semibold text-zinc-700">
+            <label className="mt-4 grid gap-2 text-sm font-semibold text-ink">
               <span>Agent model</span>
               <select
-                className="h-10 rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-zinc-500"
+                className="h-10 rounded-md border border-linen bg-surface px-3 font-mono text-sm outline-none transition focus:border-cobalt"
                 disabled={isRunning}
                 onChange={(event) => changeModel(event.target.value)}
                 value={selectedModel}
@@ -212,7 +241,7 @@ export function AgentTest({
             </label>
 
             <button
-              className="mt-4 flex h-10 w-full items-center justify-center gap-2 rounded-md bg-zinc-950 px-3 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
+              className="mt-4 flex h-10 w-full items-center justify-center gap-2 rounded-md bg-cobalt px-3 text-sm font-semibold text-white transition hover:bg-cobalt-deep disabled:cursor-not-allowed disabled:opacity-60"
               disabled={isRunning}
               onClick={() => void runTest()}
               type="button"
@@ -226,6 +255,8 @@ export function AgentTest({
                 {errorMessage}
               </p>
             ) : null}
+
+            <ArenaRanking depth={goalDepth} entries={rankings} />
 
             {report ? <ReportMetrics report={report} /> : null}
             {report ? (
@@ -243,9 +274,9 @@ export function AgentTest({
             ) : null}
           </aside>
 
-          <section className="min-h-[520px] rounded-md border border-zinc-200 bg-white p-5 shadow-hairline">
+          <section className="min-h-[520px] rounded-md border border-linen bg-surface p-5 shadow-hairline">
             {!report && isRunning ? (
-              <div className="grid h-full place-items-center text-sm text-zinc-500">
+              <div className="grid h-full place-items-center text-sm text-soot">
                 Running agent test.
               </div>
             ) : null}
@@ -253,11 +284,11 @@ export function AgentTest({
             {!report && !isRunning ? (
               <div className="grid h-full place-items-center text-center">
                 <div>
-                  <div className="mx-auto grid size-16 place-items-center rounded-md border border-zinc-200 bg-zinc-50 text-zinc-700">
+                  <div className="mx-auto grid size-16 place-items-center rounded-md border border-linen bg-paper text-soot">
                     <Bot size={28} />
                   </div>
-                  <h2 className="mt-4 text-lg font-semibold">Agent ready</h2>
-                  <p className="mt-2 max-w-sm text-sm text-zinc-500">
+                  <h2 className="mt-4 font-display text-lg font-semibold">Agent ready</h2>
+                  <p className="mt-2 max-w-sm text-sm text-soot">
                     Choose a depth and model, then run the test to generate a goal.
                   </p>
                 </div>
@@ -302,10 +333,10 @@ function PlaybackControls({
   onTogglePlayback: () => void;
 }) {
   return (
-    <div className="mt-5 rounded-md border border-zinc-200 bg-zinc-50 p-3">
+    <div className="mt-5 rounded-md border border-linen bg-paper p-3">
       <div className="flex items-center justify-between gap-3">
         <p className="text-sm font-semibold">Playback</p>
-        <p className="text-xs text-zinc-500">
+        <p className="font-mono text-xs text-soot">
           {playbackIndex}/{totalSteps}
         </p>
       </div>
@@ -332,10 +363,10 @@ function PlaybackControls({
           <SkipForward size={16} />
         </IconButton>
       </div>
-      <label className="mt-3 grid gap-1 text-xs font-semibold text-zinc-600">
+      <label className="mt-3 grid gap-1 text-xs font-semibold text-soot">
         <span>Speed</span>
         <select
-          className="h-9 rounded-md border border-zinc-300 bg-white px-2 text-sm outline-none transition focus:border-zinc-500"
+          className="h-9 rounded-md border border-linen bg-surface px-2 text-sm outline-none transition focus:border-cobalt"
           onChange={(event) => onPlaybackSpeedChange(Number(event.target.value))}
           value={playbackSpeedMs}
         >
@@ -350,6 +381,50 @@ function PlaybackControls({
   );
 }
 
+function ArenaRanking({
+  depth,
+  entries
+}: {
+  depth: number;
+  entries: AgentRankingEntry[];
+}) {
+  return (
+    <div className="mt-5 rounded-md border border-linen bg-paper p-3">
+      <p className="font-mono text-xs font-semibold uppercase tracking-wider text-soot">
+        Arena ranking · depth {depth}
+      </p>
+      {entries.length === 0 ? (
+        <p className="mt-2 text-xs text-soot">
+          No runs recorded at this depth yet. Every run counts toward the
+          ranking.
+        </p>
+      ) : (
+        <div className="mt-2 grid gap-1.5">
+          {entries.map((entry, index) => (
+            <div
+              className="flex items-center justify-between gap-2 text-xs"
+              key={entry.model}
+            >
+              <span className="truncate">
+                <span className="font-mono font-semibold text-soot">
+                  {index + 1}.
+                </span>{" "}
+                {getAgentModelLabel(entry.model)}
+              </span>
+              <span className="shrink-0 font-mono text-soot">
+                {Math.round(entry.winRate * 100)}% · {entry.wins}/{entry.runs}
+                {entry.avgCombinations !== null
+                  ? ` · ${entry.avgCombinations.toFixed(1)} avg`
+                  : ""}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ReportMetrics({ report }: { report: AgentTestReport }) {
   return (
     <div className="mt-5 grid grid-cols-2 gap-3">
@@ -357,11 +432,11 @@ function ReportMetrics({ report }: { report: AgentTestReport }) {
       <MetricCard label="Limit" value={report.maxCombinations} />
       <MetricCard label="Used" value={report.combinationsUsed} />
       <MetricCard label="Status" value={report.success ? "Pass" : "Fail"} />
-      <div className="col-span-2 rounded-md border border-zinc-200 bg-zinc-50 p-3">
-        <p className="truncate text-sm font-semibold">
+      <div className="col-span-2 rounded-md border border-linen bg-paper p-3">
+        <p className="truncate font-mono text-sm font-semibold">
           {getAgentModelLabel(report.model)}
         </p>
-        <p className="mt-1 text-xs text-zinc-500">Agent model</p>
+        <p className="mt-1 font-mono text-xs uppercase tracking-wider text-soot">Agent model</p>
       </div>
     </div>
   );
@@ -385,14 +460,14 @@ function ReportDetails({
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex min-w-0 flex-wrap items-start gap-6">
           <div>
-            <p className="text-sm font-semibold text-zinc-500">Target</p>
-            <h2 className="mt-1 text-3xl font-semibold capitalize tracking-normal">
+            <p className="font-mono text-xs font-semibold uppercase tracking-wider text-soot">Target</p>
+            <h2 className="mt-1 font-display text-3xl font-semibold capitalize tracking-normal">
               {report.goal.target.emoji ? `${report.goal.target.emoji} ` : ""}
               {report.goal.target.name}
             </h2>
           </div>
           <div className="max-w-md">
-            <p className="text-sm font-semibold text-zinc-500">Initial inventory</p>
+            <p className="font-mono text-xs font-semibold uppercase tracking-wider text-soot">Initial inventory</p>
             <div className="mt-2 flex flex-wrap gap-2">
               {report.goal.initialInventory.map((element) => (
                 <ElementPill
@@ -406,7 +481,7 @@ function ReportDetails({
         </div>
         {isPlaybackComplete ? (
           <span
-            className={`rounded-md border px-3 py-2 text-sm font-semibold ${
+            className={`rounded-md border px-3 py-2 font-mono text-sm font-semibold ${
               report.success
                 ? "border-emerald-200 bg-emerald-50 text-emerald-700"
                 : "border-amber-200 bg-amber-50 text-amber-700"
@@ -415,7 +490,7 @@ function ReportDetails({
             {formatStopReason(report.stopReason)}
           </span>
         ) : (
-          <span className="rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-sm font-semibold text-sky-700">
+          <span className="rounded-md border border-cobalt/30 bg-cobalt/5 px-3 py-2 font-mono text-sm font-semibold text-cobalt">
             Replaying {playbackIndex}/{report.steps.length}
           </span>
         )}
@@ -428,7 +503,7 @@ function ReportDetails({
       ) : null}
 
       <div>
-        <h3 className="text-sm font-semibold">Visible inventory</h3>
+        <h3 className="font-mono text-xs font-semibold uppercase tracking-wider text-soot">Visible inventory</h3>
         <div className="mt-2 flex flex-wrap gap-2">
           {inventory.map((element) => (
             <ElementPill key={element.id} name={element.name} emoji={element.emoji} />
@@ -437,10 +512,10 @@ function ReportDetails({
       </div>
 
       <div>
-        <h3 className="text-sm font-semibold">Agent path</h3>
+        <h3 className="font-mono text-xs font-semibold uppercase tracking-wider text-soot">Agent path</h3>
         <div className="mt-3 grid gap-2">
           {report.steps.length === 0 ? (
-            <p className="rounded-md border border-dashed border-zinc-200 p-3 text-sm text-zinc-500">
+            <p className="rounded-md border border-dashed border-linen p-3 text-sm text-soot">
               No combinations were completed.
             </p>
           ) : (
@@ -448,27 +523,27 @@ function ReportDetails({
               <div
                 className={`rounded-md border px-3 py-2 transition ${
                   index === visibleSteps.length - 1 && !isPlaybackComplete
-                    ? "border-sky-300 bg-sky-50"
-                    : "border-zinc-200 bg-zinc-50"
+                    ? "border-cobalt/40 bg-cobalt/5"
+                    : "border-linen bg-paper"
                 }`}
                 key={step.index}
               >
                 <div className="flex flex-wrap items-center gap-2 text-sm">
-                  <span className="font-semibold text-zinc-500">#{step.index}</span>
+                  <span className="font-mono font-semibold text-soot">#{step.index}</span>
                   <ElementPill name={step.inputA.name} emoji={step.inputA.emoji} />
-                  <span className="text-zinc-400">+</span>
+                  <span className="text-soot">+</span>
                   <ElementPill name={step.inputB.name} emoji={step.inputB.emoji} />
-                  <span className="text-zinc-400">=</span>
+                  <span className="text-soot">=</span>
                   <ElementPill name={step.output.name} emoji={step.output.emoji} />
                 </div>
                 {step.agentReason ? (
-                  <p className="mt-2 text-xs text-zinc-500">{step.agentReason}</p>
+                  <p className="mt-2 text-xs text-soot">{step.agentReason}</p>
                 ) : null}
               </div>
             ))
           )}
           {report.steps.length > 0 && visibleSteps.length === 0 ? (
-            <p className="rounded-md border border-dashed border-zinc-200 p-3 text-sm text-zinc-500">
+            <p className="rounded-md border border-dashed border-linen p-3 text-sm text-soot">
               Playback is ready.
             </p>
           ) : null}
@@ -480,7 +555,10 @@ function ReportDetails({
 
 function ElementPill({ emoji, name }: { emoji?: string; name: string }) {
   return (
-    <span className="inline-flex max-w-full items-center gap-1 rounded-md border border-zinc-200 bg-white px-2 py-1 text-xs font-medium capitalize text-zinc-700">
+    <span
+      className="element-card inline-flex max-w-full items-center gap-1 rounded-md border px-2 py-1 text-xs font-medium capitalize text-ink"
+      style={{ "--el-hue": getHueForConcept(name) } as CSSProperties}
+    >
       <span>{emoji ?? "·"}</span>
       <span className="truncate">{name}</span>
     </span>
@@ -489,9 +567,9 @@ function ElementPill({ emoji, name }: { emoji?: string; name: string }) {
 
 function MetricCard({ label, value }: { label: string; value: number | string }) {
   return (
-    <div className="rounded-md border border-zinc-200 bg-zinc-50 p-3">
-      <p className="text-2xl font-semibold">{value}</p>
-      <p className="mt-1 text-xs text-zinc-500">{label}</p>
+    <div className="rounded-md border border-linen bg-paper p-3">
+      <p className="font-mono text-2xl font-semibold">{value}</p>
+      <p className="mt-1 font-mono text-xs uppercase tracking-wider text-soot">{label}</p>
     </div>
   );
 }
@@ -510,7 +588,7 @@ function IconButton({
   return (
     <button
       aria-label={label}
-      className="grid size-10 place-items-center rounded-md border border-zinc-200 bg-white text-zinc-600 transition hover:bg-zinc-50 hover:text-zinc-950 disabled:cursor-not-allowed disabled:opacity-50"
+      className="grid size-10 place-items-center rounded-md border border-linen bg-surface text-soot transition hover:bg-paper hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
       disabled={disabled}
       onClick={onClick}
       title={label}
