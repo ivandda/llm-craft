@@ -47,6 +47,13 @@ export function getQwenModel(): string {
   return process.env.QWEN_COMBINER_MODEL?.trim() || QWEN_COMBINER_MODEL;
 }
 
+// Whether the Qwen combiner backend is wired up. The GPU VM behind it may still
+// be off (combine falls back to Vertex in that case), but a configured base URL
+// is what lets the client default to the fine-tuned model when it's on offer.
+export function isQwenCombinerConfigured(): boolean {
+  return Boolean(process.env.QWEN_COMBINER_BASE_URL?.trim());
+}
+
 export function parseQwenConcept(rawPayload: string): string {
   const withoutThinking = rawPayload.replace(THINK_PATTERN, "");
   const text = withoutThinking.replace(SPECIAL_TOKEN_PATTERN, "").trim();

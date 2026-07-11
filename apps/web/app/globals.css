@@ -117,10 +117,28 @@ input {
   }
 }
 
+.craft-indicator {
+  animation: craft-indicator 1.6s ease-in-out infinite;
+}
+
+@keyframes craft-indicator {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(43, 75, 223, 0);
+    transform: translateY(0) scale(1);
+  }
+
+  50% {
+    box-shadow: 0 0 0 6px rgba(43, 75, 223, 0.12);
+    transform: translateY(-1px) scale(1.02);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .element-pop,
   .discovery-badge,
-  .sweep-dust {
+  .sweep-dust,
+  .craft-indicator {
     animation: none;
   }
 

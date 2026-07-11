@@ -98,6 +98,24 @@ export async function requestArenaStats(depth: number): Promise<ArenaStats> {
   return (await response.json()) as ArenaStats;
 }
 
+export type AppConfig = {
+  qwenAvailable: boolean;
+};
+
+export async function requestAppConfig(): Promise<AppConfig> {
+  try {
+    const response = await fetch("/api/config", { cache: "no-store" });
+
+    if (!response.ok) {
+      return { qwenAvailable: false };
+    }
+
+    return (await response.json()) as AppConfig;
+  } catch {
+    return { qwenAvailable: false };
+  }
+}
+
 export async function requestCurrentSession(): Promise<AuthSession | null> {
   const response = await fetch("/api/auth/me", {
     cache: "no-store"
