@@ -30,7 +30,10 @@ import {
   Combine,
   LayoutGrid,
   LogOut,
+  Maximize,
+  Minus,
   Moon,
+  Plus,
   RotateCcw,
   Search,
   Settings as SettingsIcon,
@@ -49,7 +52,8 @@ import {
   useState,
   type CSSProperties,
   type PointerEvent,
-  type ReactNode
+  type ReactNode,
+  type WheelEvent
 } from "react";
 
 const TOKEN_WIDTH = 150;
@@ -104,6 +108,23 @@ type Point = {
   x: number;
   y: number;
 };
+
+type BoardView = {
+  scale: number;
+  x: number;
+  y: number;
+};
+
+type GestureState = {
+  pointers: Map<number, Point>;
+  mode: "none" | "pan" | "pinch";
+  panLast?: Point;
+  pinchDistance?: number;
+  pinchMid?: Point;
+};
+
+const MIN_ZOOM = 0.4;
+const MAX_ZOOM = 2.5;
 
 type GoalCompletion = {
   combinationsUsed: number;
@@ -218,11 +239,10 @@ export function CraftGame({
   // Which pop-up sheet is open on mobile (null = none). Desktop uses the
   // persistent sidebar instead.
   const [mobileSheet, setMobileSheet] = useState<SidebarTab | null>(null);
-  // Tap-to-combine selection on touch: first tapped board token is highlighted,
-  // tapping a second combines them.
-  const [selectedInstanceId, setSelectedInstanceId] = useState<string | null>(
-    null
-  );
+  // Board pan/zoom. Tokens live in a child that gets `translate(x,y) scale`;
+  // all pointer→board math divides by scale and subtracts the pan.
+  const [view, setView] = useState<BoardView>({ scale: 1, x: 0, y: 0 });
+  const gestureRef = useRef<GestureState>({ pointers: new Map(), mode: "none" });
   const [activeSidebarTab, setActiveSidebarTab] = useState<SidebarTab>(
     mode === "goal" ? "goal" : "elements"
   );
@@ -704,6 +724,15 @@ export function CraftGame({
     return mode === "goal" && goalPreset?.target.id === element.id;
   }
 
+  // Convert a screen point to board (content) coordinates, inverting the
+  // current pan/zoom transform applied to the token layer.
+  function toBoardPoint(clientX: number, clientY: number, rect: DOMRect): Point {
+    return {
+      x: (clientX - rect.left - view.x) / view.scale,
+      y: (clientY - rect.top - view.y) / view.scale
+    };
+  }
+
   function getBoardPosition(clientX: number, clientY: number) {
     const rect = boardRef.current?.getBoundingClientRect();
 
@@ -711,9 +740,11 @@ export function CraftGame({
       return null;
     }
 
+    const point = toBoardPoint(clientX, clientY, rect);
+
     return clampBoardPosition(
-      clientX - rect.left - TOKEN_WIDTH / 2,
-      clientY - rect.top - TOKEN_HEIGHT / 2,
+      point.x - TOKEN_WIDTH / 2,
+      point.y - TOKEN_HEIGHT / 2,
       rect
     );
   }
@@ -725,9 +756,12 @@ export function CraftGame({
       return null;
     }
 
+    // Centre of the currently visible viewport, in board coordinates.
+    const center = toBoardPoint(rect.left + rect.width / 2, rect.top + rect.height / 2, rect);
+
     return clampBoardPosition(
-      rect.width / 2 - TOKEN_WIDTH / 2 + (Math.random() - 0.5) * 140,
-      rect.height / 2 - TOKEN_HEIGHT / 2 + (Math.random() - 0.5) * 140,
+      center.x - TOKEN_WIDTH / 2 + (Math.random() - 0.5) * 120,
+      center.y - TOKEN_HEIGHT / 2 + (Math.random() - 0.5) * 120,
       rect
     );
   }
@@ -739,9 +773,10 @@ export function CraftGame({
       return [RESULT_OFFSET, RESULT_OFFSET];
     }
 
+    const point = toBoardPoint(clientX, clientY, rect);
     const position = clampBoardPosition(
-      clientX - rect.left + RESULT_OFFSET,
-      clientY - rect.top + RESULT_OFFSET,
+      point.x + RESULT_OFFSET,
+      point.y + RESULT_OFFSET,
       rect
     );
 
@@ -755,9 +790,11 @@ export function CraftGame({
       return;
     }
 
+    // offsetX/Y are screen-space (captured at pointer-down), so subtract them
+    // before dividing by scale.
     const position = clampBoardPosition(
-      clientX - rect.left - dragState.offsetX,
-      clientY - rect.top - dragState.offsetY,
+      (clientX - rect.left - view.x - dragState.offsetX) / view.scale,
+      (clientY - rect.top - view.y - dragState.offsetY) / view.scale,
       rect
     );
 
@@ -854,10 +891,13 @@ export function CraftGame({
       return { x: 0, y: 0 };
     }
 
-    return {
-      x: blackHoleRect.left - boardRect.left + blackHoleRect.width / 2,
-      y: blackHoleRect.top - boardRect.top + blackHoleRect.height / 2
-    };
+    // The black hole is drawn unscaled on the container; convert its centre to
+    // the (pan/zoom-transformed) content coordinates the tokens animate in.
+    return toBoardPoint(
+      blackHoleRect.left + blackHoleRect.width / 2,
+      blackHoleRect.top + blackHoleRect.height / 2,
+      boardRect
+    );
   }
 
   function removeBoardElement(instanceId: string) {
@@ -1002,9 +1042,8 @@ export function CraftGame({
     }
   }
 
-  // --- Touch (tap) interaction: no dragging from the scrolling list ---
-
-  // Add an element from a pop-up sheet to the board near its centre.
+  // Add an element picked from a pop-up sheet to the board (touch: no drag
+  // from the scrolling list). Dropped near the centre of the current view.
   function placeElementOnBoard(element: ElementToken) {
     setErrorMessage(null);
     const position = getFallbackBoardPosition();
@@ -1020,52 +1059,136 @@ export function CraftGame({
     setMobileSheet(null);
   }
 
-  // Tap a board token: select it, or combine it with the already-selected one.
-  function handleBoardTokenTap(
-    element: BoardElement,
-    clientX: number,
-    clientY: number
-  ) {
-    if (isCombining || isSweeping) {
+  // --- Board pan / zoom ---
+
+  // Scale by `factor`, keeping the board point under (anchorX, anchorY) fixed.
+  function zoomAt(factor: number, anchorX: number, anchorY: number) {
+    const rect = boardRef.current?.getBoundingClientRect();
+
+    if (!rect) {
       return;
     }
 
-    if (!selectedInstanceId) {
-      setSelectedInstanceId(element.instanceId);
+    setView((current) => {
+      const nextScale = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, current.scale * factor));
+
+      if (nextScale === current.scale) {
+        return current;
+      }
+
+      const anchorLeft = anchorX - rect.left;
+      const anchorTop = anchorY - rect.top;
+
+      return {
+        scale: nextScale,
+        x: anchorLeft - ((anchorLeft - current.x) / current.scale) * nextScale,
+        y: anchorTop - ((anchorTop - current.y) / current.scale) * nextScale
+      };
+    });
+  }
+
+  function zoomByStep(direction: 1 | -1) {
+    const rect = boardRef.current?.getBoundingClientRect();
+
+    if (!rect) {
       return;
     }
 
-    if (selectedInstanceId === element.instanceId) {
-      setSelectedInstanceId(null);
-      return;
-    }
-
-    const firstElement = boardElements.find(
-      (candidate) => candidate.instanceId === selectedInstanceId
+    zoomAt(
+      direction === 1 ? 1.25 : 0.8,
+      rect.left + rect.width / 2,
+      rect.top + rect.height / 2
     );
-    setSelectedInstanceId(null);
+  }
 
-    if (!firstElement) {
+  function resetView() {
+    setView({ scale: 1, x: 0, y: 0 });
+  }
+
+  function handleBoardWheel(event: WheelEvent<HTMLDivElement>) {
+    zoomAt(event.deltaY < 0 ? 1.1 : 0.9, event.clientX, event.clientY);
+  }
+
+  function isInteractiveTarget(target: EventTarget | null): boolean {
+    return (
+      // Use Element (not HTMLElement): the pointer often lands on an inner SVG
+      // <path> of a button icon, which is an SVGElement. Tokens drag
+      // themselves; buttons (zoom/back) must keep their click, so panning must
+      // not capture the pointer away from them.
+      target instanceof Element &&
+      target.closest("button, a, input, select, textarea, [data-board-token-id]") !==
+        null
+    );
+  }
+
+  // Pan/pinch on empty board space. Token drags capture their own pointer and
+  // are ignored here (and skipped while a token drag is in progress).
+  function handleBoardPointerDown(event: PointerEvent<HTMLDivElement>) {
+    if (dragStateRef.current || isInteractiveTarget(event.target)) {
       return;
     }
 
-    void combineElementsOnBoard(firstElement, element, clientX, clientY, [
-      firstElement.instanceId,
-      element.instanceId
-    ]);
-  }
+    const gesture = gestureRef.current;
+    gesture.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    event.currentTarget.setPointerCapture(event.pointerId);
 
-  function removeSelectedToken() {
-    if (selectedInstanceId) {
-      removeBoardElement(selectedInstanceId);
-      setSelectedInstanceId(null);
+    if (gesture.pointers.size === 1) {
+      gesture.mode = "pan";
+      gesture.panLast = { x: event.clientX, y: event.clientY };
+    } else if (gesture.pointers.size === 2) {
+      const [a, b] = [...gesture.pointers.values()];
+      gesture.mode = "pinch";
+      gesture.pinchDistance = Math.hypot(a.x - b.x, a.y - b.y);
+      gesture.pinchMid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
     }
   }
 
-  const selectedElement = selectedInstanceId
-    ? boardElements.find((element) => element.instanceId === selectedInstanceId) ??
-      null
-    : null;
+  function handleBoardPointerMove(event: PointerEvent<HTMLDivElement>) {
+    const gesture = gestureRef.current;
+
+    if (!gesture.pointers.has(event.pointerId)) {
+      return;
+    }
+
+    gesture.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+
+    if (gesture.mode === "pan" && gesture.panLast) {
+      const dx = event.clientX - gesture.panLast.x;
+      const dy = event.clientY - gesture.panLast.y;
+      gesture.panLast = { x: event.clientX, y: event.clientY };
+      setView((current) => ({ ...current, x: current.x + dx, y: current.y + dy }));
+    } else if (gesture.mode === "pinch" && gesture.pinchDistance && gesture.pinchMid) {
+      const [a, b] = [...gesture.pointers.values()];
+
+      if (!a || !b) {
+        return;
+      }
+
+      const distance = Math.hypot(a.x - b.x, a.y - b.y);
+      const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      const panDx = mid.x - gesture.pinchMid.x;
+      const panDy = mid.y - gesture.pinchMid.y;
+
+      zoomAt(distance / gesture.pinchDistance, gesture.pinchMid.x, gesture.pinchMid.y);
+      setView((current) => ({ ...current, x: current.x + panDx, y: current.y + panDy }));
+
+      gesture.pinchDistance = distance;
+      gesture.pinchMid = mid;
+    }
+  }
+
+  function handleBoardPointerUp(event: PointerEvent<HTMLDivElement>) {
+    const gesture = gestureRef.current;
+    gesture.pointers.delete(event.pointerId);
+
+    if (gesture.pointers.size === 0) {
+      gesture.mode = "none";
+    } else if (gesture.pointers.size === 1) {
+      const remaining = [...gesture.pointers.values()][0];
+      gesture.mode = "pan";
+      gesture.panLast = { x: remaining.x, y: remaining.y };
+    }
+  }
 
   // Shared panel bodies, rendered in the desktop sidebar and the mobile
   // pop-up sheets from a single source of truth.
@@ -1263,55 +1386,64 @@ export function CraftGame({
           </div>
 
           <div
-            className="absolute inset-0 z-0"
-            onClick={() => {
-              // Tap empty board (touch mode) clears the current selection.
-              if (!isDesktop) {
-                setSelectedInstanceId(null);
-              }
-            }}
+            className="absolute inset-0 z-0 touch-none"
+            onPointerCancel={handleBoardPointerUp}
+            onPointerDown={handleBoardPointerDown}
+            onPointerMove={handleBoardPointerMove}
+            onPointerUp={handleBoardPointerUp}
+            onWheel={handleBoardWheel}
             ref={boardRef}
             style={{
               backgroundImage: isDarkMode
                 ? "radial-gradient(circle at 1px 1px, rgba(244,244,245,0.11) 1px, transparent 0)"
                 : "radial-gradient(circle at 1px 1px, rgba(38,34,27,0.1) 1px, transparent 0)",
-              backgroundSize: "28px 28px"
+              backgroundSize: `${28 * view.scale}px ${28 * view.scale}px`,
+              backgroundPosition: `${view.x}px ${view.y}px`
             }}
           >
-            {/* The black hole is a drag-to-delete target; touch uses the
-                selection action bar to remove instead. */}
-            {isDesktop ? (
-              <BlackHoleDropZone
-                isActive={dragState !== null || isSweeping || vanishingToken !== null}
-                isHot={isOverBlackHole}
-                ref={blackHoleRef}
-              />
-            ) : null}
-            {isSweeping && sweepTarget ? (
-              <SweepAnimation target={sweepTarget} />
-            ) : null}
-            {boardElements.map((element) => (
-              <BoardToken
-                element={element}
-                interactionMode={isDesktop ? "drag" : "tap"}
-                isCombining={isCombining}
-                isDragging={dragState?.instanceId === element.instanceId}
-                isSelected={selectedInstanceId === element.instanceId}
-                isSweeping={isSweeping}
-                key={element.instanceId}
-                onPointerCancel={cancelActiveDrag}
-                onPointerDown={beginBoardDrag}
-                onPointerMove={updateBoardDrag}
-                onPointerUp={finishBoardDrag}
-                onTap={handleBoardTokenTap}
-                sweepTarget={sweepTarget}
-                vanishTarget={
-                  vanishingToken?.instanceId === element.instanceId
-                    ? vanishingToken.target
-                    : null
-                }
-              />
-            ))}
+            <BlackHoleDropZone
+              isActive={dragState !== null || isSweeping || vanishingToken !== null}
+              isHot={isOverBlackHole}
+              ref={blackHoleRef}
+            />
+            {/* Tokens live in a pan/zoom-transformed layer. */}
+            <div
+              className="absolute inset-0 origin-top-left"
+              style={{
+                transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})`
+              }}
+            >
+              {isSweeping && sweepTarget ? (
+                <SweepAnimation target={sweepTarget} />
+              ) : null}
+              {boardElements.map((element) => (
+                <BoardToken
+                  element={element}
+                  isCombining={isCombining}
+                  isDragging={dragState?.instanceId === element.instanceId}
+                  isSweeping={isSweeping}
+                  key={element.instanceId}
+                  onPointerCancel={cancelActiveDrag}
+                  onPointerDown={beginBoardDrag}
+                  onPointerMove={updateBoardDrag}
+                  onPointerUp={finishBoardDrag}
+                  sweepTarget={sweepTarget}
+                  vanishTarget={
+                    vanishingToken?.instanceId === element.instanceId
+                      ? vanishingToken.target
+                      : null
+                  }
+                />
+              ))}
+            </div>
+
+            <ZoomControls
+              canReset={view.scale !== 1 || view.x !== 0 || view.y !== 0}
+              onReset={resetView}
+              onZoomIn={() => zoomByStep(1)}
+              onZoomOut={() => zoomByStep(-1)}
+              scale={view.scale}
+            />
           </div>
 
           {mode === "goal" && goalPreset ? (
@@ -1328,7 +1460,7 @@ export function CraftGame({
               <p className="max-w-md rounded-md border border-dashed border-linen bg-surface/85 px-4 py-3 text-center text-sm text-soot backdrop-blur">
                 {isDesktop
                   ? "Drag one element onto another to combine them"
-                  : "Add elements, then tap two of them to combine"}
+                  : "Tap Elements to add, then drag one onto another to combine"}
                 {mode === "goal" ? " — craft your way to the goal element" : ""}.
               </p>
             </div>
@@ -1411,33 +1543,6 @@ export function CraftGame({
           ))}
         </nav>
       </div>
-
-      {/* Mobile selection action bar for tap-to-combine / remove. */}
-      {!isDesktop && selectedElement ? (
-        <div className="fixed inset-x-0 bottom-[4.75rem] z-40 flex justify-center px-4 lg:hidden">
-          <div className="flex max-w-full items-center gap-2 rounded-md border border-linen bg-surface px-3 py-2 shadow-lift">
-            <span className="text-lg">{selectedElement.emoji ?? "·"}</span>
-            <span className="min-w-0 flex-1 truncate text-sm font-semibold capitalize">
-              {selectedElement.name}
-            </span>
-            <span className="shrink-0 text-xs text-soot">tap another →</span>
-            <button
-              className="shrink-0 rounded-md border border-linen px-2 py-1 text-xs font-medium text-soot transition hover:bg-paper hover:text-ink"
-              onClick={removeSelectedToken}
-              type="button"
-            >
-              Remove
-            </button>
-            <button
-              className="shrink-0 rounded-md border border-linen px-2 py-1 text-xs font-medium text-soot transition hover:bg-paper hover:text-ink"
-              onClick={() => setSelectedInstanceId(null)}
-              type="button"
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      ) : null}
 
       {/* Mobile pop-up sheets. */}
       {!isDesktop && mobileSheet ? (
@@ -1840,6 +1945,57 @@ function GoalBanner({
   );
 }
 
+function ZoomControls({
+  canReset,
+  onReset,
+  onZoomIn,
+  onZoomOut,
+  scale
+}: {
+  canReset: boolean;
+  onReset: () => void;
+  onZoomIn: () => void;
+  onZoomOut: () => void;
+  scale: number;
+}) {
+  return (
+    <div className="absolute right-3 top-3 z-30 flex flex-col items-stretch gap-0.5 rounded-md border border-linen bg-surface/90 p-1 shadow-hairline backdrop-blur">
+      <button
+        aria-label="Zoom in"
+        className="grid size-8 place-items-center rounded text-soot transition hover:bg-paper hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
+        disabled={scale >= MAX_ZOOM}
+        onClick={onZoomIn}
+        type="button"
+      >
+        <Plus size={16} />
+      </button>
+      <span className="text-center font-mono text-[10px] tabular-nums text-soot">
+        {Math.round(scale * 100)}%
+      </span>
+      <button
+        aria-label="Zoom out"
+        className="grid size-8 place-items-center rounded text-soot transition hover:bg-paper hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
+        disabled={scale <= MIN_ZOOM}
+        onClick={onZoomOut}
+        type="button"
+      >
+        <Minus size={16} />
+      </button>
+      {canReset ? (
+        <button
+          aria-label="Reset zoom"
+          className="grid size-8 place-items-center rounded text-soot transition hover:bg-paper hover:text-ink"
+          onClick={onReset}
+          title="Reset view"
+          type="button"
+        >
+          <Maximize size={14} />
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 const BlackHoleDropZone = forwardRef<
   HTMLDivElement,
   { isActive: boolean; isHot: boolean }
@@ -1890,24 +2046,19 @@ function SweepAnimation({ target }: { target: Point }) {
 
 function BoardToken({
   element,
-  interactionMode,
   isCombining,
   isDragging,
-  isSelected,
   isSweeping,
   onPointerCancel,
   onPointerDown,
   onPointerMove,
   onPointerUp,
-  onTap,
   sweepTarget,
   vanishTarget
 }: {
   element: BoardElement;
-  interactionMode: "drag" | "tap";
   isCombining: boolean;
   isDragging: boolean;
-  isSelected: boolean;
   isSweeping: boolean;
   onPointerDown: (
     event: PointerEvent<HTMLButtonElement>,
@@ -1916,11 +2067,9 @@ function BoardToken({
   onPointerCancel: () => void;
   onPointerMove: (event: PointerEvent<HTMLButtonElement>) => void;
   onPointerUp: (event: PointerEvent<HTMLButtonElement>) => void;
-  onTap: (element: BoardElement, clientX: number, clientY: number) => void;
   sweepTarget: Point | null;
   vanishTarget: Point | null;
 }) {
-  const isTap = interactionMode === "tap";
   const vanishTransform = vanishTarget
     ? `translate(${vanishTarget.x - element.x - TOKEN_WIDTH / 2}px, ${
         vanishTarget.y - element.y - TOKEN_HEIGHT / 2
@@ -1938,38 +2087,23 @@ function BoardToken({
     return Number.isFinite(spawnTimestamp) && Date.now() - spawnTimestamp < 1000;
   });
 
-  const pointerHandlers = isTap
-    ? {
-        onClick: (event: PointerEvent<HTMLButtonElement>) => {
-          // Stop the board's background onClick from immediately deselecting.
-          event.stopPropagation();
-          onTap(element, event.clientX, event.clientY);
-        }
-      }
-    : {
-        onPointerCancel,
-        onPointerDown: (event: PointerEvent<HTMLButtonElement>) =>
-          onPointerDown(event, element),
-        onPointerMove,
-        onPointerUp
-      };
-
   return (
     <button
       className={`element-card absolute flex h-12 w-[150px] touch-none select-none items-center gap-2 rounded-md border px-2.5 text-left shadow-sm transition-shadow hover:shadow-md ${
-        isDragging || isSelected ? "opacity-95 shadow-lg ring-2 ring-cobalt" : ""
+        isDragging ? "opacity-95 shadow-lg ring-2 ring-cobalt" : ""
       } ${
         isCombining || isSweeping
           ? "cursor-wait"
-          : isTap
-            ? "cursor-pointer"
-            : "cursor-grab active:cursor-grabbing"
+          : "cursor-grab active:cursor-grabbing"
       } ${isSweeping ? "board-token-sweeping" : ""} ${
         vanishTarget ? "board-token-vanishing" : ""
       } ${isFreshSpawn && !vanishTarget ? "element-pop" : ""}`}
       data-board-token-id={element.instanceId}
       disabled={isCombining || isSweeping || vanishTarget !== null}
-      {...pointerHandlers}
+      onPointerCancel={onPointerCancel}
+      onPointerDown={(event) => onPointerDown(event, element)}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
       style={
         {
           left: element.x,
