@@ -1,9 +1,12 @@
 import type {
   AuthUser,
+  AgentRankingEntry,
   AgentTestReport,
   AgentTestRequest,
   CombineRequest,
   CombineResponse,
+  DpoCandidatesRequest,
+  DpoCandidatesResponse,
   DpoPreferenceRequest,
   FeaturedAchievement,
   GoalPreset,
@@ -27,6 +30,10 @@ export async function requestCombination(
     },
     body: JSON.stringify(request)
   });
+
+  if (response.status === 429) {
+    throw new Error("You are combining too fast. Give it a few seconds.");
+  }
 
   if (!response.ok) {
     throw new Error("Combination request failed");
@@ -63,6 +70,27 @@ export async function requestDpoPreference(
   await requestJson("/api/dpo/preferences", request);
 }
 
+export async function requestDpoCandidates(
+  request: DpoCandidatesRequest
+): Promise<DpoCandidatesResponse> {
+  return requestJson("/api/dpo/candidates", request);
+}
+
+export async function requestAgentRankings(
+  depth: number
+): Promise<AgentRankingEntry[]> {
+  const response = await fetch(`/api/agent-test/rankings?depth=${depth}`, {
+    cache: "no-store"
+  });
+
+  if (!response.ok) {
+    throw new Error("Rankings request failed");
+  }
+
+  const payload = (await response.json()) as { rankings: AgentRankingEntry[] };
+  return payload.rankings;
+}
+
 export async function requestCurrentSession(): Promise<AuthSession | null> {
   const response = await fetch("/api/auth/me", {
     cache: "no-store"
@@ -74,6 +102,19 @@ export async function requestCurrentSession(): Promise<AuthSession | null> {
 
   if (!response.ok) {
     throw new Error("Session request failed");
+  }
+
+  return response.json() as Promise<AuthSession>;
+}
+
+export async function requestGuestSession(): Promise<AuthSession> {
+  const response = await fetch("/api/auth/guest", {
+    method: "POST",
+    cache: "no-store"
+  });
+
+  if (!response.ok) {
+    throw new Error("Guest session request failed");
   }
 
   return response.json() as Promise<AuthSession>;

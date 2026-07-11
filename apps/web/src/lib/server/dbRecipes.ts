@@ -1,12 +1,27 @@
 import { createElementToken, normalizeConcept } from "@/lib/craft";
-import { DEFAULT_VERTEX_MODEL, isQwenCombinerModel } from "@/lib/agentModels";
+import { getEmojiForConcept } from "@/lib/emoji";
+import {
+  DEFAULT_VERTEX_MODEL,
+  isQwenCombinerModel,
+  QWEN_COMBINER_MODEL
+} from "@/lib/agentModels";
 import { query, transaction } from "@/lib/server/db";
-import { generateCombinationWithQwen } from "@/lib/server/qwenCombiner";
+import {
+  generateCombinationWithQwen,
+  QwenConfigurationError,
+  QwenGenerationError
+} from "@/lib/server/qwenCombiner";
 import {
   generateCombinationWithVertex,
   getVertexModel
 } from "@/lib/server/vertexCombiner";
-import type { CombineRequest, CombineResponse, ElementToken } from "@/lib/types";
+import type {
+  CombineRequest,
+  CombineResponse,
+  DpoCandidate,
+  DpoCandidatesResponse,
+  ElementToken
+} from "@/lib/types";
 import { createHash, randomBytes } from "crypto";
 import type { PoolClient } from "pg";
 
@@ -35,11 +50,137 @@ export async function combineElementsWithDataset(
     return recipe;
   }
 
-  const generatedRecipe = isQwenCombinerModel(model)
-    ? await generateCombinationWithQwen(request, model)
-    : await generateCombinationWithVertex(request, model);
-  await saveGeneratedRecipe(request, generatedRecipe, model, getGenerationSource(model));
+  const { generatedRecipe, effectiveModel } = await generateWithFallback(
+    request,
+    model
+  );
+  await saveGeneratedRecipe(
+    request,
+    generatedRecipe,
+    effectiveModel,
+    getGenerationSource(effectiveModel)
+  );
   return generatedRecipe;
+}
+
+const MAX_DPO_CANDIDATES = 3;
+
+/**
+ * Assembles a blind set of candidates for a "Help train the AI" round: the
+ * stored canonical output (if any) plus live generations from models that did
+ * not produce it. Each candidate carries `generatedBy` for training-data
+ * attribution; the UI must not display it.
+ */
+export async function buildDpoCandidates(
+  request: CombineRequest
+): Promise<DpoCandidatesResponse> {
+  const model = request.model ?? getVertexModel();
+  const stored = await findStoredRecipe(
+    request.inputA.name,
+    request.inputB.name,
+    model
+  );
+  const candidates: DpoCandidate[] = [];
+  const canonicalModel = stored?.source === "model_generated" ? stored.model : undefined;
+
+  if (stored) {
+    candidates.push({
+      ...stored.result,
+      generatedBy: stored.source === "known_recipe" ? "dataset" : canonicalModel
+    });
+  }
+
+  const liveModels = [QWEN_COMBINER_MODEL, getVertexModel()].filter(
+    (liveModel) => liveModel !== canonicalModel
+  );
+  const attempts = await Promise.allSettled(
+    liveModels.map((liveModel) =>
+      (isQwenCombinerModel(liveModel)
+        ? generateCombinationWithQwen(request, liveModel)
+        : generateCombinationWithVertex(request, liveModel)
+      ).then(async (response) => {
+        await saveGeneratedRecipe(
+          request,
+          response,
+          liveModel,
+          getGenerationSource(liveModel)
+        );
+        return { response, liveModel };
+      })
+    )
+  );
+
+  for (const attempt of attempts) {
+    if (attempt.status === "fulfilled") {
+      candidates.push({
+        ...attempt.value.response.result,
+        generatedBy: attempt.value.liveModel
+      });
+    }
+  }
+
+  if (stored?.knownOutputs) {
+    for (const alternative of stored.knownOutputs.slice(1)) {
+      candidates.push({
+        ...alternative,
+        generatedBy: stored.source === "known_recipe" ? "dataset" : canonicalModel
+      });
+    }
+  }
+
+  return {
+    candidates: dedupeCandidates(candidates).slice(0, MAX_DPO_CANDIDATES),
+    source: stored ? stored.source : "model_generated"
+  };
+}
+
+function dedupeCandidates(candidates: DpoCandidate[]): DpoCandidate[] {
+  const seenIds = new Set<string>();
+  const uniqueCandidates: DpoCandidate[] = [];
+
+  for (const candidate of candidates) {
+    if (!seenIds.has(candidate.id)) {
+      seenIds.add(candidate.id);
+      uniqueCandidates.push(candidate);
+    }
+  }
+
+  return uniqueCandidates;
+}
+
+async function generateWithFallback(
+  request: CombineRequest,
+  model: string
+): Promise<{ generatedRecipe: CombineResponse; effectiveModel: string }> {
+  if (!isQwenCombinerModel(model)) {
+    return {
+      generatedRecipe: await generateCombinationWithVertex(request, model),
+      effectiveModel: model
+    };
+  }
+
+  try {
+    return {
+      generatedRecipe: await generateCombinationWithQwen(request, model),
+      effectiveModel: model
+    };
+  } catch (error) {
+    // The Qwen VM is expected to be off most of the time (GPU cost); fall
+    // back to Vertex so the game keeps working instead of erroring.
+    if (
+      error instanceof QwenConfigurationError ||
+      error instanceof QwenGenerationError
+    ) {
+      const fallbackModel = getVertexModel();
+
+      return {
+        generatedRecipe: await generateCombinationWithVertex(request, fallbackModel),
+        effectiveModel: fallbackModel
+      };
+    }
+
+    throw error;
+  }
 }
 
 async function findStoredRecipe(
@@ -212,7 +353,10 @@ function createRawCandidate(response: CombineResponse, model: string) {
 
 function toElementToken(row: CandidateRow): ElementToken {
   const rawOutput = readRawOutput(row.raw_candidate);
-  return createElementToken(row.output, rawOutput?.emoji);
+  return createElementToken(
+    row.output,
+    rawOutput?.emoji ?? getEmojiForConcept(row.output)
+  );
 }
 
 function createPairId(datasetName: string, inputA: string, inputB: string): string {
