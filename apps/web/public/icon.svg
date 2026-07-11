@@ -1,0 +1,17 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="llm craft">
+  <rect width="512" height="512" rx="112" fill="#2B4BDF"/>
+  <!-- Two "concept" tiles combining into one, centered in the maskable safe zone -->
+  <g>
+    <rect x="150" y="150" width="118" height="118" rx="26" fill="#FAF6EE"/>
+    <rect x="150" y="150" width="118" height="118" rx="26" fill="none" stroke="#1E38B6" stroke-opacity="0.15" stroke-width="4"/>
+    <rect x="244" y="244" width="118" height="118" rx="26" fill="#FFFDF8"/>
+    <rect x="244" y="244" width="118" height="118" rx="26" fill="none" stroke="#1E38B6" stroke-opacity="0.15" stroke-width="4"/>
+    <!-- combine plus -->
+    <g stroke="#2B4BDF" stroke-width="20" stroke-linecap="round">
+      <line x1="256" y1="228" x2="256" y2="284"/>
+      <line x1="228" y1="256" x2="284" y2="256"/>
+    </g>
+  </g>
+  <!-- signature cobalt dot accent -->
+  <circle cx="256" cy="392" r="15" fill="#FAF6EE"/>
+</svg>

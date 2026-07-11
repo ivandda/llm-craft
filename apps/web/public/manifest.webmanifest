@@ -1,0 +1,38 @@
+{
+  "name": "llm·craft",
+  "short_name": "llm·craft",
+  "description": "Combine concepts, discover new ones, and teach a fine-tuned model what makes a good invention.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#FAF6EE",
+  "theme_color": "#FAF6EE",
+  "categories": ["games", "education"],
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "type": "image/svg+xml",
+      "sizes": "any",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-192.png",
+      "type": "image/png",
+      "sizes": "192x192",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-maskable-512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "maskable"
+    }
+  ]
+}
