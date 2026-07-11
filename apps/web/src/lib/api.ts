@@ -1,8 +1,7 @@
 import type {
   AuthUser,
   AgentRankingEntry,
-  AgentTestReport,
-  AgentTestRequest,
+  AgentRunSummary,
   CombineRequest,
   CombineResponse,
   DpoCandidatesRequest,
@@ -53,15 +52,18 @@ export async function requestRandomGoal(
   return payload.goal;
 }
 
-export async function requestAgentTestRun(
-  request: AgentTestRequest
-): Promise<AgentTestReport> {
-  const payload = await requestJson<{ report: AgentTestReport }>(
-    "/api/agent-test/run",
-    request
-  );
+export async function requestArenaFeed(
+  depth: number
+): Promise<{ goal: GoalPreset; runs: AgentRunSummary[] }> {
+  const response = await fetch(`/api/agent-test/runs?depth=${depth}`, {
+    cache: "no-store"
+  });
 
-  return payload.report;
+  if (!response.ok) {
+    throw new Error("Arena feed request failed");
+  }
+
+  return (await response.json()) as { goal: GoalPreset; runs: AgentRunSummary[] };
 }
 
 export async function requestDpoPreference(
