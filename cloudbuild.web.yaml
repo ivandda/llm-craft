@@ -6,12 +6,15 @@
 # One-time setup (after connecting the GitHub repo in the console):
 #   gcloud builds triggers create github \
 #     --project nlp2026-498021 \
-#     --region us-central1 \
 #     --name deploy-llm-craft-web \
-#     --repo-owner <github-user> --repo-name llm-craft \
-#     --branch-pattern '^dev$' \
-#     --included-files 'apps/web/**' \
-#     --build-config cloudbuild.web.yaml
+#     --repo-owner ivandda --repo-name llm-craft \
+#     --branch-pattern '^main$' \
+#     --included-files 'apps/web/**,cloudbuild.web.yaml' \
+#     --build-config cloudbuild.web.yaml \
+#     --require-approval
+#
+# --require-approval holds every build until a project owner approves it in
+# the Cloud Build console, so pushes to main never deploy silently.
 steps:
   - name: gcr.io/cloud-builders/docker
     args:
