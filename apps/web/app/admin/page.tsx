@@ -1,12 +1,15 @@
 "use client";
 
+import { AGENT_MODEL_OPTIONS, getAgentModelLabel } from "@/lib/agentModels";
+import type { AgentTestReport } from "@/lib/types";
 import {
   Activity,
   ExternalLink,
   Play,
   RefreshCw,
   ShieldCheck,
-  Square
+  Square,
+  Swords
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
@@ -101,7 +104,7 @@ export default function AdminDashboardPage() {
         <header className="flex items-center justify-between border-b border-linen pb-4">
           <div>
             <h1 className="flex items-center gap-2 font-display text-xl font-semibold">
-              <ShieldCheck className="size-5 text-cobalt" aria-hidden />
+              <ShieldCheck className="size-5 text-accent" aria-hidden />
               Admin · model server
             </h1>
             <p className="mt-1 text-sm text-soot">
@@ -204,6 +207,8 @@ export default function AdminDashboardPage() {
           ) : null}
         </section>
 
+        <ArenaControl />
+
         <section className="mt-6 rounded-md border border-linen bg-surface p-5 shadow-hairline">
           <h2 className="font-display text-sm font-semibold">
             Verify in Google Cloud
@@ -225,6 +230,138 @@ export default function AdminDashboardPage() {
         </section>
       </div>
     </main>
+  );
+}
+
+type ArenaModelState =
+  | { state: "idle" }
+  | { state: "running" }
+  | { state: "done"; success: boolean; combinationsUsed: number }
+  | { state: "error"; message: string };
+
+function ArenaControl() {
+  const [depth, setDepth] = useState(3);
+  const [isRacing, setIsRacing] = useState(false);
+  const [progress, setProgress] = useState<Record<string, ArenaModelState>>({});
+
+  async function raceAllModels() {
+    setIsRacing(true);
+    setProgress(
+      Object.fromEntries(
+        AGENT_MODEL_OPTIONS.map((model) => [model.id, { state: "idle" }])
+      )
+    );
+
+    // Sequential on purpose: parallel runs would race each other for the
+    // same combiner and blur per-model latency in the reports.
+    for (const model of AGENT_MODEL_OPTIONS) {
+      setProgress((current) => ({
+        ...current,
+        [model.id]: { state: "running" }
+      }));
+
+      try {
+        const response = await fetch("/api/admin/arena/run", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ depth, model: model.id })
+        });
+        const payload = (await response.json()) as {
+          report?: AgentTestReport;
+          error?: string;
+        };
+
+        if (!response.ok || !payload.report) {
+          throw new Error(payload.error ?? `Run failed (${response.status})`);
+        }
+
+        const { report } = payload;
+        setProgress((current) => ({
+          ...current,
+          [model.id]: {
+            state: "done",
+            success: report.success,
+            combinationsUsed: report.combinationsUsed
+          }
+        }));
+      } catch (error) {
+        setProgress((current) => ({
+          ...current,
+          [model.id]: {
+            state: "error",
+            message: error instanceof Error ? error.message : "Run failed"
+          }
+        }));
+      }
+    }
+
+    setIsRacing(false);
+  }
+
+  return (
+    <section className="mt-6 rounded-md border border-linen bg-surface p-5 shadow-hairline">
+      <h2 className="flex items-center gap-2 font-display text-sm font-semibold">
+        <Swords className="size-4 text-accent" aria-hidden />
+        LLM Arena · run today&apos;s challenge
+      </h2>
+      <p className="mt-1 text-xs text-soot">
+        Races all models against the same daily goal, one after another. Each
+        run costs real model calls; results appear immediately in the public
+        Arena mode.
+      </p>
+
+      <div className="mt-4 flex flex-wrap items-end gap-3">
+        <label className="grid gap-1 text-xs font-semibold text-soot">
+          <span>Goal depth</span>
+          <select
+            className="h-10 rounded-md border border-linen bg-surface px-3 text-sm text-ink outline-none transition focus:border-cobalt"
+            disabled={isRacing}
+            onChange={(event) => setDepth(Number(event.target.value))}
+            value={depth}
+          >
+            {Array.from({ length: 10 }, (_, index) => index + 1).map((value) => (
+              <option key={value} value={value}>
+                {value}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button
+          type="button"
+          onClick={() => void raceAllModels()}
+          disabled={isRacing}
+          className="flex h-10 items-center gap-2 rounded-md bg-cobalt px-4 text-sm font-semibold text-white transition hover:bg-cobalt-deep disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <Play className="size-4" aria-hidden />
+          {isRacing ? "Racing…" : `Race ${AGENT_MODEL_OPTIONS.length} models`}
+        </button>
+      </div>
+
+      {Object.keys(progress).length > 0 ? (
+        <ul className="mt-4 grid gap-2">
+          {AGENT_MODEL_OPTIONS.map((model) => {
+            const modelState = progress[model.id] ?? { state: "idle" };
+
+            return (
+              <li
+                className="flex items-center justify-between gap-2 rounded-md border border-linen bg-paper px-3 py-2 text-sm"
+                key={model.id}
+              >
+                <span className="font-medium">{getAgentModelLabel(model.id)}</span>
+                <span className="font-mono text-xs text-soot">
+                  {modelState.state === "idle" ? "waiting" : null}
+                  {modelState.state === "running" ? "running…" : null}
+                  {modelState.state === "done"
+                    ? `${modelState.success ? "✓ solved" : "✗ failed"} · ${modelState.combinationsUsed} moves`
+                    : null}
+                  {modelState.state === "error" ? `error: ${modelState.message}` : null}
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      ) : null}
+    </section>
   );
 }
 

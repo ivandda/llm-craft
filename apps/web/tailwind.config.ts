@@ -9,11 +9,17 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        paper: "#FAF6EE",
-        surface: "#FFFDF8",
-        ink: "#26221B",
-        soot: "#6F6759",
-        linen: "#E3DACA",
+        // Theme-aware semantic tokens (see globals.css). The `<alpha-value>`
+        // placeholder lets `bg-surface/85`, `text-soot`, etc. keep working.
+        paper: "rgb(var(--color-paper) / <alpha-value>)",
+        surface: "rgb(var(--color-surface) / <alpha-value>)",
+        ink: "rgb(var(--color-ink) / <alpha-value>)",
+        soot: "rgb(var(--color-soot) / <alpha-value>)",
+        linen: "rgb(var(--color-linen) / <alpha-value>)",
+        // `accent` is theme-aware (brightens in dark) for text/icons/rings.
+        accent: "rgb(var(--color-accent) / <alpha-value>)",
+        // cobalt stays constant: it backs buttons that carry white text in
+        // both themes (white on #2B4BDF passes AA).
         cobalt: "#2B4BDF",
         "cobalt-deep": "#1E38B6"
       },

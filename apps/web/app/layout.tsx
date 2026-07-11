@@ -68,6 +68,16 @@ export default function RootLayout({
       lang="en"
     >
       <body>
+        {/*
+         * Set the theme class before first paint to avoid a light-mode flash
+         * for dark-mode users. Kept in sync afterwards by @/lib/theme.
+         */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html:
+              "(function(){try{var t=localStorage.getItem('llm-craft.theme');if(t!=='light'&&t!=='dark'){t=window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}if(t==='dark'){document.documentElement.classList.add('dark');}}catch(e){}})();"
+          }}
+        />
         {children}
         <ServiceWorkerRegistrar />
       </body>

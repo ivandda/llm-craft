@@ -7,12 +7,12 @@ import {
   requestLeaderboard,
   requestLeaderboardSubmission
 } from "@/lib/api";
-import { getCombinerModelLabel } from "@/lib/agentModels";
 import { getHueForConcept } from "@/lib/emoji";
 import { mergeInventory } from "@/lib/craft";
 import { selectDpoCandidates } from "@/lib/dpo";
 import { getInitialInventoryForMode } from "@/lib/gameModes";
 import { createGameStorageKey } from "@/lib/gameStorage";
+import { setTheme, useTheme } from "@/lib/theme";
 import type {
   AuthUser,
   CombineResponse,
@@ -24,10 +24,12 @@ import type {
   RecipeHistoryItem
 } from "@/lib/types";
 import {
+  ArrowLeft,
   Brush,
+  ChevronDown,
+  ChevronUp,
   Combine,
   LogOut,
-  Menu,
   Moon,
   RotateCcw,
   Search,
@@ -47,7 +49,7 @@ import {
   type PointerEvent
 } from "react";
 
-const TOKEN_WIDTH = 132;
+const TOKEN_WIDTH = 150;
 const TOKEN_HEIGHT = 48;
 const RESULT_OFFSET = 18;
 // "Help train the AI" rounds fire on combinations 3, 8, 13, ... instead of on
@@ -157,7 +159,6 @@ export function CraftGame({
       inventory: createGameStorageKey(user.id, mode, "inventory"),
       history: createGameStorageKey(user.id, mode, "history"),
       board: createGameStorageKey(user.id, mode, "board"),
-      darkMode: createGameStorageKey(user.id, mode, "darkMode"),
       consumeInputs: createGameStorageKey(user.id, mode, "consumeInputs"),
       dpoTestMode: createGameStorageKey(user.id, mode, "dpoTestMode")
     }),
@@ -188,7 +189,12 @@ export function CraftGame({
       : null;
     setDragStateValue(next);
   }
-  const [isDarkMode, setIsDarkMode] = useState(false);
+  // Theme is global (persisted app-wide, applied to <html>), so toggling it
+  // here stays consistent with every other screen.
+  const isDarkMode = useTheme() === "dark";
+  // Mobile bottom-drawer height: 0 = peek (board maximal), 1 = default,
+  // 2 = tall (browse elements). Ignored at lg where the drawer is a sidebar.
+  const [mobileDrawerSnap, setMobileDrawerSnap] = useState<0 | 1 | 2>(1);
   const [activeSidebarTab, setActiveSidebarTab] = useState<SidebarTab>(
     mode === "goal" ? "goal" : "elements"
   );
@@ -237,7 +243,6 @@ export function CraftGame({
         ? readStoredValue(storageKeys.board, createInitialBoard(storedInventory))
         : createInitialBoard(storedInventory)
     );
-    setIsDarkMode(readStoredValue(storageKeys.darkMode, false));
     setConsumeInputsOnCombine(readStoredValue(storageKeys.consumeInputs, false));
     setIsDpoTestMode(readStoredValue(storageKeys.dpoTestMode, true));
     setPendingDpoChoice(null);
@@ -277,12 +282,6 @@ export function CraftGame({
       window.localStorage.setItem(storageKeys.history, JSON.stringify(history));
     }
   }, [hasHydratedStorage, history, storageKeys.history]);
-
-  useEffect(() => {
-    if (hasHydratedStorage) {
-      window.localStorage.setItem(storageKeys.darkMode, JSON.stringify(isDarkMode));
-    }
-  }, [hasHydratedStorage, isDarkMode, storageKeys.darkMode]);
 
   useEffect(() => {
     if (hasHydratedStorage) {
@@ -975,25 +974,30 @@ export function CraftGame({
   }
 
   return (
-    <main
-      className={`h-[100dvh] overflow-hidden ${
-        isDarkMode ? "dark bg-zinc-950 text-zinc-50" : "bg-paper text-ink"
-      }`}
-    >
-      <div className="grid h-[100dvh] grid-cols-1 grid-rows-[minmax(0,1fr)_minmax(0,44dvh)] overflow-hidden lg:grid-cols-[minmax(0,1fr)_320px] lg:grid-rows-1">
-        <section className="relative min-h-0 overflow-hidden border-b border-linen bg-paper dark:border-zinc-800 dark:bg-zinc-900 lg:border-b-0 lg:border-r">
-          <div className="absolute left-4 top-4 z-30 flex items-center gap-3 rounded-md border border-linen bg-surface/90 px-3 py-2 shadow-hairline backdrop-blur dark:border-zinc-700 dark:bg-zinc-950/85">
+    <main className="h-[100dvh] overflow-hidden bg-paper text-ink">
+      <div
+        className={`grid h-[100dvh] grid-cols-1 overflow-hidden lg:grid-cols-[minmax(0,1fr)_320px] lg:grid-rows-1 ${
+          mobileDrawerSnap === 0
+            ? "grid-rows-[minmax(0,1fr)_3.25rem]"
+            : mobileDrawerSnap === 2
+              ? "grid-rows-[minmax(0,20dvh)_minmax(0,1fr)]"
+              : "grid-rows-[minmax(0,1fr)_minmax(0,46dvh)]"
+        }`}
+      >
+        <section className="relative min-h-0 overflow-hidden border-b border-linen bg-paper lg:border-b-0 lg:border-r">
+          <div className="absolute left-3 top-3 z-30 flex items-center gap-2 rounded-md border border-linen bg-surface/90 px-2.5 py-2 shadow-hairline backdrop-blur">
             <button
-              className="flex h-9 items-center gap-2 rounded-md border border-linen px-3 font-mono text-xs uppercase tracking-wider text-soot transition hover:bg-paper hover:text-ink dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-50"
+              className="flex h-9 items-center gap-1.5 rounded-md border border-linen px-2.5 text-sm font-medium text-soot transition hover:bg-paper hover:text-ink"
               onClick={onBackToMenu}
+              title="Back to modes"
               type="button"
             >
-              <Menu size={14} />
-              Menu
+              <ArrowLeft size={16} />
+              Modes
             </button>
-            <div>
-              <h1 className="font-display text-base font-semibold tracking-normal">llm-craft</h1>
-              <p className="font-mono text-xs text-soot dark:text-zinc-400">
+            <div className="min-w-0">
+              <h1 className="font-display text-sm font-semibold tracking-normal">llm-craft</h1>
+              <p className="font-mono text-xs text-soot">
                 {mode === "goal" ? "Goal" : "Sandbox"} · {boardElements.length} on board
               </p>
             </div>
@@ -1049,7 +1053,7 @@ export function CraftGame({
 
           {history.length === 0 && !isCombining && !goalCompletion ? (
             <div className="pointer-events-none absolute inset-x-0 bottom-8 z-10 flex justify-center px-4">
-              <p className="max-w-md rounded-md border border-dashed border-linen bg-surface/85 px-4 py-3 text-center text-sm text-soot backdrop-blur dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-400">
+              <p className="max-w-md rounded-md border border-dashed border-linen bg-surface/85 px-4 py-3 text-center text-sm text-soot backdrop-blur">
                 Drag one element onto another to combine them
                 {mode === "goal" ? " — craft your way to the goal element" : ""}.
               </p>
@@ -1058,7 +1062,6 @@ export function CraftGame({
 
           <StatusToast
             errorMessage={errorMessage}
-            isGoalMode={mode === "goal"}
             isCombining={isCombining}
             result={result}
           />
@@ -1066,14 +1069,14 @@ export function CraftGame({
           {discovery ? (
             <div className="pointer-events-none absolute inset-x-0 top-20 z-40 flex justify-center">
               <div
-                className="discovery-badge flex max-w-[calc(100%-2rem)] items-center gap-3 rounded-md border border-linen bg-surface px-4 py-2.5 shadow-lift dark:border-zinc-700 dark:bg-zinc-900"
+                className="discovery-badge flex max-w-[calc(100%-2rem)] items-center gap-3 rounded-md border border-linen bg-surface px-4 py-2.5 shadow-lift"
                 key={discovery.name}
               >
                 <span className="text-2xl">{discovery.emoji ?? "·"}</span>
                 <span className="truncate text-sm font-semibold capitalize">
                   {discovery.name}
                 </span>
-                <span className="shrink-0 font-mono text-xs uppercase tracking-wider text-cobalt">
+                <span className="shrink-0 font-mono text-xs uppercase tracking-wider text-accent">
                   {discovery.isModelGenerated
                     ? "New — invented by the model"
                     : "First discovery"}
@@ -1084,19 +1087,37 @@ export function CraftGame({
         </section>
 
         <aside
-          className={`flex min-h-0 flex-col overflow-hidden p-4 transition-colors ${
+          className={`flex min-h-0 flex-col overflow-hidden p-3 transition-colors lg:p-4 ${
             dragState?.kind === "board"
-              ? "bg-paper dark:bg-zinc-900"
-              : "bg-surface dark:bg-zinc-950"
+              ? "bg-paper"
+              : "bg-surface"
           }`}
         >
-          <div className="mb-4 flex shrink-0 gap-1 rounded-md border border-linen bg-paper p-1 dark:border-zinc-800 dark:bg-zinc-900">
+          {/* Mobile drawer handle: cycles peek → default → tall so the board
+              can take most of the screen when crafting. Hidden on desktop. */}
+          <button
+            aria-label="Resize elements panel"
+            className="group mb-2 flex h-7 shrink-0 items-center justify-center gap-2 rounded-md text-soot transition hover:text-ink lg:hidden"
+            onClick={() =>
+              setMobileDrawerSnap((snap) => ((snap + 1) % 3) as 0 | 1 | 2)
+            }
+            title="Resize elements panel"
+            type="button"
+          >
+            <span className="h-1 w-9 rounded-full bg-linen transition group-hover:bg-soot" />
+            {mobileDrawerSnap === 2 ? (
+              <ChevronDown size={14} />
+            ) : (
+              <ChevronUp size={14} />
+            )}
+          </button>
+          <div className="mb-3 flex shrink-0 gap-1 rounded-md border border-linen bg-paper p-1 lg:mb-4">
             {sidebarTabs.map((tab) => (
               <button
                 className={`h-8 flex-1 rounded font-mono text-xs uppercase tracking-wider transition ${
                   sidebarTab === tab.id
-                    ? "bg-surface text-ink shadow-hairline dark:bg-zinc-950 dark:text-zinc-50"
-                    : "text-soot hover:text-ink dark:text-zinc-400 dark:hover:text-zinc-200"
+                    ? "bg-surface text-ink shadow-hairline"
+                    : "text-soot hover:text-ink"
                 }`}
                 key={tab.id}
                 onClick={() => setActiveSidebarTab(tab.id)}
@@ -1113,17 +1134,17 @@ export function CraftGame({
                 <label className="relative block">
                   <Search
                     aria-hidden="true"
-                    className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-soot dark:text-zinc-500"
+                    className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-soot"
                     size={16}
                   />
                   <input
-                    className="h-10 w-full rounded-md border border-linen bg-paper pl-9 pr-3 text-sm outline-none transition placeholder:text-soot focus:border-cobalt focus:bg-surface dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50 dark:placeholder:text-zinc-500 dark:focus:border-zinc-500 dark:focus:bg-zinc-950"
+                    className="h-10 w-full rounded-md border border-linen bg-paper pl-9 pr-3 text-sm outline-none transition placeholder:text-soot focus:border-cobalt focus:bg-surface"
                     onChange={(event) => setQuery(event.target.value)}
                     placeholder="Search"
                     value={query}
                   />
                 </label>
-                <p className="mt-2 text-right font-mono text-xs text-soot dark:text-zinc-400">
+                <p className="mt-2 text-right font-mono text-xs text-soot">
                   {inventory.length} elements
                 </p>
               </div>
@@ -1141,17 +1162,17 @@ export function CraftGame({
                 ))}
               </div>
 
-              <div className="mt-5 min-h-0 shrink-0 border-t border-linen pt-4 dark:border-zinc-800">
+              <div className="mt-5 min-h-0 shrink-0 border-t border-linen pt-4">
                 <div className="mb-3 flex items-center justify-between gap-3">
                   <h2 className="text-base font-semibold">Recent</h2>
-                  <span className="font-mono text-xs text-soot dark:text-zinc-400">
+                  <span className="font-mono text-xs text-soot">
                     {history.length}
                   </span>
                 </div>
 
                 <div className="grid max-h-52 gap-2 overflow-y-auto pr-1 lg:max-h-[220px]">
                   {history.length === 0 ? (
-                    <div className="rounded-md border border-dashed border-linen p-4 text-sm text-soot dark:border-zinc-700 dark:text-zinc-400">
+                    <div className="rounded-md border border-dashed border-linen p-4 text-sm text-soot">
                       No recipes yet.
                     </div>
                   ) : (
@@ -1181,78 +1202,78 @@ export function CraftGame({
 
           {sidebarTab === "settings" ? (
             <div className="grid min-h-0 flex-1 content-start gap-2 overflow-y-auto pr-1">
-              <label className="flex min-h-11 items-center gap-3 rounded-md border border-linen bg-paper px-3 text-sm font-medium dark:border-zinc-700 dark:bg-zinc-900">
-                <Combine className="shrink-0 text-soot dark:text-zinc-400" size={16} />
+              <label className="flex min-h-11 items-center gap-3 rounded-md border border-linen bg-paper px-3 text-sm font-medium">
+                <Combine className="shrink-0 text-soot" size={16} />
                 <span className="flex-1">Consume inputs</span>
                 <input
                   checked={consumeInputsOnCombine}
-                  className="size-4 accent-cobalt dark:accent-zinc-50"
+                  className="size-4 accent-cobalt"
                   onChange={(event) => setConsumeInputsOnCombine(event.target.checked)}
                   type="checkbox"
                 />
               </label>
-              <label className="flex min-h-11 items-center gap-3 rounded-md border border-linen bg-paper px-3 text-sm font-medium dark:border-zinc-700 dark:bg-zinc-900">
-                <Sparkles className="shrink-0 text-soot dark:text-zinc-400" size={16} />
+              <label className="flex min-h-11 items-center gap-3 rounded-md border border-linen bg-paper px-3 text-sm font-medium">
+                <Sparkles className="shrink-0 text-soot" size={16} />
                 <span className="flex-1">Help train the AI</span>
                 <input
                   checked={isDpoTestMode}
-                  className="size-4 accent-cobalt dark:accent-zinc-50"
+                  className="size-4 accent-cobalt"
                   onChange={(event) => setIsDpoTestMode(event.target.checked)}
                   type="checkbox"
                 />
               </label>
-              <label className="flex min-h-11 items-center gap-3 rounded-md border border-linen bg-paper px-3 text-sm font-medium dark:border-zinc-700 dark:bg-zinc-900">
+              <label className="flex min-h-11 items-center gap-3 rounded-md border border-linen bg-paper px-3 text-sm font-medium">
                 {isDarkMode ? (
-                  <Sun className="shrink-0 text-soot dark:text-zinc-400" size={16} />
+                  <Sun className="shrink-0 text-soot" size={16} />
                 ) : (
-                  <Moon className="shrink-0 text-soot dark:text-zinc-400" size={16} />
+                  <Moon className="shrink-0 text-soot" size={16} />
                 )}
                 <span className="flex-1">Dark mode</span>
                 <input
                   checked={isDarkMode}
-                  className="size-4 accent-cobalt dark:accent-zinc-50"
-                  onChange={(event) => setIsDarkMode(event.target.checked)}
+                  className="size-4 accent-cobalt"
+                  onChange={(event) => setTheme(event.target.checked ? "dark" : "light")}
                   type="checkbox"
                 />
               </label>
 
-              <div className="my-1 border-t border-linen dark:border-zinc-800" />
+              <div className="my-1 border-t border-linen" />
 
               <button
-                className="flex min-h-11 w-full items-center gap-3 rounded-md border border-linen bg-paper px-3 text-left text-sm font-medium transition hover:bg-surface dark:border-zinc-700 dark:bg-zinc-900 dark:hover:bg-zinc-800"
+                className="flex min-h-11 w-full items-center gap-3 rounded-md border border-linen bg-paper px-3 text-left text-sm font-medium transition hover:bg-surface"
                 onClick={() => onOpenProfile({ inventory, history })}
                 type="button"
               >
-                <UserCircle className="shrink-0 text-soot dark:text-zinc-400" size={16} />
+                <UserCircle className="shrink-0 text-soot" size={16} />
                 Profile
               </button>
               {mode === "sandbox" ? (
                 <>
                   <button
-                    className="flex min-h-11 w-full items-center gap-3 rounded-md border border-linen bg-paper px-3 text-left text-sm font-medium transition hover:bg-surface disabled:cursor-not-allowed disabled:opacity-45 dark:border-zinc-700 dark:bg-zinc-900 dark:hover:bg-zinc-800"
+                    className="flex min-h-11 w-full items-center gap-3 rounded-md border border-linen bg-paper px-3 text-left text-sm font-medium transition hover:bg-surface disabled:cursor-not-allowed disabled:opacity-45"
                     disabled={boardElements.length === 0 || isSweeping}
                     onClick={clearSandboxWithSweep}
                     type="button"
                   >
-                    <Brush className="shrink-0 text-soot dark:text-zinc-400" size={16} />
+                    <Brush className="shrink-0 text-soot" size={16} />
                     Clear board
                   </button>
                   <button
-                    className="flex min-h-11 w-full items-center gap-3 rounded-md border border-linen bg-paper px-3 text-left text-sm font-medium transition hover:bg-surface dark:border-zinc-700 dark:bg-zinc-900 dark:hover:bg-zinc-800"
+                    className="flex min-h-11 w-full items-center gap-3 rounded-md border border-linen bg-paper px-3 text-left text-sm font-medium transition hover:bg-surface"
                     onClick={() => resetGame()}
                     type="button"
                   >
-                    <RotateCcw className="shrink-0 text-soot dark:text-zinc-400" size={16} />
+                    <RotateCcw className="shrink-0 text-soot" size={16} />
                     Reset progress
                   </button>
                 </>
               ) : null}
               <button
-                className="flex min-h-11 w-full items-center gap-3 rounded-md border border-linen bg-paper px-3 text-left text-sm font-medium transition hover:bg-surface dark:border-zinc-700 dark:bg-zinc-900 dark:hover:bg-zinc-800"
+                className="flex min-h-11 w-full items-center gap-3 rounded-md border border-linen bg-paper px-3 text-left text-sm font-medium transition hover:bg-surface"
                 onClick={onLogout}
                 type="button"
               >
-                <LogOut className="shrink-0 text-soot dark:text-zinc-400" size={16} />
+                <LogOut className="shrink-0 text-soot" size={16} />
                 Log out
               </button>
             </div>
@@ -1304,37 +1325,46 @@ function GoalTabPanel({
   onReset: () => void;
 }) {
   return (
-    <div className="grid gap-3 rounded-md border border-linen bg-paper p-3 dark:border-emerald-900 dark:bg-emerald-950/30">
+    <div className="grid gap-3 rounded-md border border-linen bg-paper p-3">
       <div className="flex items-start gap-3">
-        <Target className="mt-0.5 shrink-0 text-cobalt dark:text-emerald-400" size={18} />
+        <Target className="mt-0.5 shrink-0 text-accent" size={18} />
         <div className="min-w-0">
-          <p className="font-mono text-xs font-semibold uppercase tracking-wider text-cobalt dark:text-emerald-400">
+          <p className="font-mono text-xs font-semibold uppercase tracking-wider text-accent">
             Goal
           </p>
           <h2 className="truncate text-sm font-semibold">{goalPreset.title}</h2>
-          <p className="mt-1 text-sm text-soot dark:text-zinc-300">
+          <p className="mt-1 text-sm text-soot">
             {goalPreset.objective}
           </p>
         </div>
       </div>
 
       <div className="grid grid-cols-2 gap-2">
-        <div className="rounded-md border border-linen bg-surface px-3 py-2 dark:border-emerald-900 dark:bg-zinc-950">
-          <p className="font-mono text-xs uppercase tracking-wider text-soot dark:text-zinc-400">Depth</p>
+        <div className="rounded-md border border-linen bg-surface px-3 py-2">
+          <p className="font-mono text-xs uppercase tracking-wider text-soot">Depth</p>
           <p className="mt-1 font-mono text-sm font-semibold">
             {goalPreset.metadata.minDepth ?? goalPreset.metadata.depth}
           </p>
         </div>
-        <div className="rounded-md border border-linen bg-surface px-3 py-2 dark:border-emerald-900 dark:bg-zinc-950">
-          <p className="font-mono text-xs uppercase tracking-wider text-soot dark:text-zinc-400">Start</p>
+        <div className="rounded-md border border-linen bg-surface px-3 py-2">
+          <p className="font-mono text-xs uppercase tracking-wider text-soot">Start</p>
           <p className="mt-1 truncate font-mono text-sm font-semibold capitalize">
             {goalPreset.metadata.initialInventoryId ?? "fallback"}
           </p>
         </div>
       </div>
 
+      {goalPreset.metadata.minDepth !== undefined &&
+      goalPreset.metadata.minDepth !== goalPreset.metadata.depth ? (
+        <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          No goal exists at depth {goalPreset.metadata.depth} yet, so you got
+          the closest available: depth {goalPreset.metadata.minDepth}. Deeper
+          goals appear as players and the model discover more recipes.
+        </p>
+      ) : null}
+
       <div>
-        <p className="mb-2 font-mono text-xs font-semibold uppercase tracking-wider text-soot dark:text-zinc-400">
+        <p className="mb-2 font-mono text-xs font-semibold uppercase tracking-wider text-soot">
           Initial inventory
         </p>
         <div className="flex flex-wrap gap-1.5">
@@ -1350,10 +1380,10 @@ function GoalTabPanel({
         </div>
       </div>
 
-      <label className="grid gap-1 text-sm font-medium text-ink dark:text-zinc-200">
+      <label className="grid gap-1 text-sm font-medium text-ink">
         <span>Goal depth</span>
         <select
-          className="h-9 rounded-md border border-linen bg-surface px-3 text-sm outline-none transition focus:border-cobalt disabled:cursor-wait disabled:opacity-60 dark:border-emerald-900 dark:bg-zinc-950"
+          className="h-9 rounded-md border border-linen bg-surface px-3 text-sm outline-none transition focus:border-cobalt disabled:cursor-wait disabled:opacity-60"
           disabled={isGeneratingGoal}
           onChange={(event) => onGoalDepthChange(Number(event.target.value))}
           value={goalDepth}
@@ -1368,7 +1398,7 @@ function GoalTabPanel({
 
       <div className="grid grid-cols-2 gap-2">
         <button
-          className="flex h-10 items-center justify-center gap-2 rounded-md border border-linen bg-surface px-3 text-sm font-semibold transition hover:bg-paper dark:border-emerald-900 dark:bg-zinc-950 dark:hover:bg-emerald-950/50"
+          className="flex h-10 items-center justify-center gap-2 rounded-md border border-linen bg-surface px-3 text-sm font-semibold transition hover:bg-paper"
           disabled={isGeneratingGoal}
           onClick={onReset}
           type="button"
@@ -1408,10 +1438,10 @@ function DpoChoiceModal({
   onSkip: () => void;
 }) {
   return (
-    <div className="fixed inset-0 z-[2147483647] grid place-items-center overflow-y-auto bg-ink/45 px-4 py-6 backdrop-blur-sm">
+    <div className="fixed inset-0 z-[2147483647] grid place-items-center overflow-y-auto bg-black/55 px-4 py-6 backdrop-blur-sm">
       <div className="my-auto max-h-[calc(100dvh-3rem)] w-full max-w-xl overflow-y-auto rounded-md border border-linen bg-surface p-5 text-ink shadow-lift">
         <div>
-          <p className="font-mono text-xs font-semibold uppercase tracking-wider text-cobalt">
+          <p className="font-mono text-xs font-semibold uppercase tracking-wider text-accent">
             Help train the AI
           </p>
           <h2 className="mt-1 font-display text-2xl font-black tracking-normal">
@@ -1436,7 +1466,7 @@ function DpoChoiceModal({
               <span className="truncate text-lg font-semibold capitalize">
                 {candidate.name}
               </span>
-              <span className="text-sm font-medium text-cobalt">Select</span>
+              <span className="text-sm font-medium text-accent">Select</span>
             </button>
           ))}
         </div>
@@ -1463,13 +1493,13 @@ function DpoChoiceModal({
 function LeaderboardPreview({ entries }: { entries: LeaderboardEntry[] }) {
   return (
     <div>
-      <div className="flex items-center gap-2 font-mono text-xs font-semibold uppercase tracking-wider text-soot dark:text-zinc-400">
+      <div className="flex items-center gap-2 font-mono text-xs font-semibold uppercase tracking-wider text-soot">
         <Trophy size={13} />
         Leaderboard
       </div>
       <div className="mt-2 grid gap-1">
         {entries.length === 0 ? (
-          <p className="text-xs text-soot dark:text-zinc-400">
+          <p className="text-xs text-soot">
             No completed runs yet.
           </p>
         ) : (
@@ -1513,11 +1543,11 @@ function GoalCelebration({
       : null;
 
   return (
-    <div className="fixed inset-0 z-[2147483647] grid place-items-center overflow-y-auto bg-ink/45 px-4 py-6 backdrop-blur-sm">
+    <div className="fixed inset-0 z-[2147483647] grid place-items-center overflow-y-auto bg-black/55 px-4 py-6 backdrop-blur-sm">
       <div className="my-auto max-h-[calc(100dvh-3rem)] w-full max-w-lg overflow-y-auto rounded-md border border-linen bg-surface p-5 text-ink shadow-lift">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <p className="font-mono text-xs font-semibold uppercase tracking-wider text-cobalt">
+            <p className="font-mono text-xs font-semibold uppercase tracking-wider text-accent">
               Goal complete
             </p>
             <h2 className="mt-1 font-display text-3xl font-black tracking-normal">
@@ -1617,9 +1647,9 @@ function GoalBanner({
 }) {
   return (
     <div className="pointer-events-none absolute left-1/2 top-[4.75rem] z-20 max-w-[calc(100%-2rem)] -translate-x-1/2 md:top-4">
-      <div className="flex items-center gap-2.5 rounded-md border border-linen bg-surface/95 px-3 py-2 shadow-hairline backdrop-blur dark:border-zinc-700 dark:bg-zinc-950/85">
-        <Target className="shrink-0 text-cobalt" size={14} />
-        <span className="font-mono text-xs font-semibold uppercase tracking-wider text-soot dark:text-zinc-400">
+      <div className="flex items-center gap-2.5 rounded-md border border-linen bg-surface/95 px-3 py-2 shadow-hairline backdrop-blur">
+        <Target className="shrink-0 text-accent" size={14} />
+        <span className="font-mono text-xs font-semibold uppercase tracking-wider text-soot">
           Craft
         </span>
         <span
@@ -1629,7 +1659,7 @@ function GoalBanner({
           <span>{target.emoji ?? "·"}</span>
           <span className="max-w-36 truncate">{target.name}</span>
         </span>
-        <span className="shrink-0 font-mono text-xs text-soot dark:text-zinc-400">
+        <span className="shrink-0 font-mono text-xs text-soot">
           {isComplete
             ? `done in ${combinationsUsed}`
             : `${combinationsUsed} used · doable in ${par}`}
@@ -1732,8 +1762,8 @@ function BoardToken({
 
   return (
     <button
-      className={`element-card absolute flex h-12 w-[132px] touch-none select-none items-center gap-2 rounded-md border px-3 text-left shadow-sm transition-shadow hover:shadow-md ${
-        isDragging ? "opacity-90 shadow-lg ring-2 ring-cobalt dark:ring-zinc-100" : ""
+      className={`element-card absolute flex h-12 w-[150px] touch-none select-none items-center gap-2 rounded-md border px-2.5 text-left shadow-sm transition-shadow hover:shadow-md ${
+        isDragging ? "opacity-90 shadow-lg ring-2 ring-cobalt" : ""
       } ${
         isCombining || isSweeping
           ? "cursor-wait"
@@ -1758,10 +1788,10 @@ function BoardToken({
       }
       type="button"
     >
-      <span className="grid size-8 shrink-0 place-items-center rounded border border-linen bg-surface/70 text-lg dark:border-zinc-700 dark:bg-zinc-950/40">
+      <span className="grid size-8 shrink-0 place-items-center rounded border border-linen bg-surface/70 text-lg">
         {element.emoji ?? "·"}
       </span>
-      <span className="min-w-0 truncate text-sm font-medium capitalize">
+      <span className="min-w-0 break-words text-[13px] font-medium capitalize leading-[1.15] line-clamp-2">
         {element.name}
       </span>
     </button>
@@ -1795,7 +1825,7 @@ function InventoryToken({
       type="button"
     >
       <span className="text-2xl">{element.emoji ?? "·"}</span>
-      <span className="mt-1 line-clamp-2 w-full break-words text-xs font-medium capitalize leading-tight text-ink dark:text-zinc-200">
+      <span className="mt-1 w-full hyphens-auto break-words text-xs font-medium capitalize leading-tight text-ink">
         {element.name}
       </span>
     </button>
@@ -1829,7 +1859,7 @@ function DragPreview({
 
   return (
     <div
-      className="element-card pointer-events-none fixed left-0 top-0 z-50 flex h-12 w-[132px] items-center gap-2 rounded-md border px-3 text-left opacity-90 shadow-lg ring-2 ring-cobalt dark:ring-zinc-100"
+      className="element-card pointer-events-none fixed left-0 top-0 z-50 flex h-12 w-[150px] items-center gap-2 rounded-md border px-2.5 text-left opacity-90 shadow-lg ring-2 ring-cobalt"
       ref={nodeRef}
       style={
         {
@@ -1840,10 +1870,10 @@ function DragPreview({
         } as CSSProperties
       }
     >
-      <span className="grid size-8 shrink-0 place-items-center rounded border border-linen bg-surface/70 text-lg dark:border-zinc-700 dark:bg-zinc-950/40">
+      <span className="grid size-8 shrink-0 place-items-center rounded border border-linen bg-surface/70 text-lg">
         {dragState.element.emoji ?? "·"}
       </span>
-      <span className="min-w-0 truncate text-sm font-medium capitalize">
+      <span className="min-w-0 break-words text-[13px] font-medium capitalize leading-[1.15] line-clamp-2">
         {dragState.element.name}
       </span>
     </div>
@@ -1852,12 +1882,10 @@ function DragPreview({
 
 function StatusToast({
   errorMessage,
-  isGoalMode,
   isCombining,
   result
 }: {
   errorMessage: string | null;
-  isGoalMode: boolean;
   isCombining: boolean;
   result: CombineResponse | null;
 }) {
@@ -1867,40 +1895,25 @@ function StatusToast({
 
   return (
     <div
-      className={`absolute left-4 z-40 max-w-[calc(100%-2rem)] rounded-md border border-linen bg-surface/95 px-4 py-3 shadow-hairline backdrop-blur dark:border-zinc-700 dark:bg-zinc-950/90 sm:max-w-sm ${
-        isGoalMode ? "bottom-32" : "bottom-4"
-      }`}
+      className={`absolute bottom-3 left-3 z-40 flex max-w-[calc(100%-1.5rem)] items-center gap-2 rounded-md border border-linen bg-surface/95 px-3 py-1.5 shadow-hairline backdrop-blur sm:max-w-md`}
     >
       {errorMessage ? (
-        <p className="text-sm text-soot dark:text-zinc-300">{errorMessage}</p>
+        <p className="text-sm text-soot">{errorMessage}</p>
       ) : isCombining ? (
-        <p className="text-sm text-soot dark:text-zinc-300">
-          Resolving combination.
-        </p>
+        <p className="text-sm text-soot">Resolving combination…</p>
       ) : result ? (
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="text-xl">{result.result.emoji ?? "·"}</span>
-            <span className="truncate text-sm font-semibold capitalize">
-              {result.result.name}
-            </span>
-          </div>
-          <div className="mt-2 flex flex-wrap gap-2 font-mono text-xs text-soot dark:text-zinc-400">
-            <span className="rounded border border-linen bg-paper px-2 py-1 dark:border-zinc-700 dark:bg-zinc-900">
-              {formatCombineSource(result.source)}
-            </span>
-            {typeof result.confidence === "number" ? (
-              <span className="rounded border border-linen bg-paper px-2 py-1 dark:border-zinc-700 dark:bg-zinc-900">
-                {Math.round(result.confidence * 100)}%
-              </span>
-            ) : null}
-            {result.source === "model_generated" && result.model ? (
-              <span className="rounded border border-linen bg-paper px-2 py-1 dark:border-zinc-700 dark:bg-zinc-900">
-                {getCombinerModelLabel(result.model)}
-              </span>
-            ) : null}
-          </div>
-        </div>
+        <>
+          <span className="text-base">{result.result.emoji ?? "·"}</span>
+          <span className="truncate text-sm font-semibold capitalize">
+            {result.result.name}
+          </span>
+          <span className="ml-auto shrink-0 rounded border border-linen bg-paper px-1.5 py-0.5 font-mono text-[11px] text-soot">
+            {formatCombineSource(result.source)}
+            {typeof result.confidence === "number"
+              ? ` · ${Math.round(result.confidence * 100)}%`
+              : ""}
+          </span>
+        </>
       ) : null}
     </div>
   );
@@ -1908,8 +1921,8 @@ function StatusToast({
 
 function RecipeCard({ item }: { item: RecipeHistoryItem }) {
   return (
-    <div className="rounded-md border border-linen bg-paper p-3 dark:border-zinc-700 dark:bg-zinc-900">
-      <div className="flex flex-wrap items-center gap-1 text-xs text-soot dark:text-zinc-400">
+    <div className="rounded-md border border-linen bg-paper p-3">
+      <div className="flex flex-wrap items-center gap-1 text-xs text-soot">
         <span>{formatElementName(item.inputA)}</span>
         <span>+</span>
         <span>{formatElementName(item.inputB)}</span>
@@ -1918,7 +1931,7 @@ function RecipeCard({ item }: { item: RecipeHistoryItem }) {
         <span className="truncate text-sm font-medium capitalize">
           {formatElementName(item.output)}
         </span>
-        <span className="rounded border border-linen bg-surface px-2 py-1 font-mono text-xs text-soot dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-400">
+        <span className="rounded border border-linen bg-surface px-2 py-1 font-mono text-xs text-soot">
           {formatCombineSource(item.source)}
         </span>
       </div>

@@ -30,8 +30,9 @@ import type {
 } from "@/lib/types";
 import { AgentTest } from "@/components/AgentTest";
 import { CraftGame } from "@/components/CraftGame";
+import { BackButton } from "@/components/BackButton";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import {
-  ArrowLeft,
   BadgeCheck,
   Bot,
   LogIn,
@@ -274,7 +275,7 @@ function LoadingScreen() {
 function Wordmark({ className = "text-xl" }: { className?: string }) {
   return (
     <span className={`font-display font-bold tracking-tight ${className}`}>
-      llm<span className="text-cobalt">·</span>craft
+      llm<span className="text-accent">·</span>craft
     </span>
   );
 }
@@ -460,6 +461,7 @@ function ModeMenu({
                 Sign in
               </button>
             ) : null}
+            <ThemeToggle />
             <IconButton label="Profile" onClick={onOpenProfile}>
               <BadgeCheck size={17} />
             </IconButton>
@@ -739,9 +741,8 @@ function ProfileView({
             <p className="mt-1 font-mono text-sm text-soot">@{user.username}</p>
           </div>
           <div className="flex items-center gap-2">
-            <IconButton label="Back" onClick={onBack}>
-              <ArrowLeft size={17} />
-            </IconButton>
+            <BackButton onClick={onBack} />
+            <ThemeToggle />
             <IconButton label="Log out" onClick={onLogout}>
               <LogOut size={17} />
             </IconButton>

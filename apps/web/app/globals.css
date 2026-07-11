@@ -2,10 +2,31 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Semantic color tokens as "R G B" channel triplets so Tailwind's
+ * `rgb(var(--x) / <alpha-value>)` opacity modifiers keep working. Switching
+ * these under `.dark` re-themes every screen at once — no per-component
+ * `dark:` variants. Dark values are chosen to clear WCAG AA on text tokens
+ * (ink/soot/accent) against the paper/surface backgrounds.
+ */
 :root {
   color-scheme: light;
-  --background: #faf6ee;
-  --foreground: #26221b;
+  --color-paper: 250 246 238; /* #FAF6EE */
+  --color-surface: 255 253 248; /* #FFFDF8 */
+  --color-ink: 38 34 27; /* #26221B */
+  --color-soot: 111 103 89; /* #6F6759 — 4.9:1 on paper */
+  --color-linen: 227 218 202; /* #E3DACA */
+  --color-accent: 43 75 223; /* #2B4BDF */
+}
+
+.dark {
+  color-scheme: dark;
+  --color-paper: 22 20 15; /* #16140F */
+  --color-surface: 32 29 22; /* #201D16 */
+  --color-ink: 244 240 231; /* #F4F0E7 — 15:1 on paper */
+  --color-soot: 168 159 143; /* #A89F8F — 6.9:1 on paper */
+  --color-linen: 58 52 42; /* #3A342A */
+  --color-accent: 138 160 255; /* #8AA0FF — 8:1 on paper */
 }
 
 * {
@@ -19,8 +40,8 @@ body {
 
 body {
   margin: 0;
-  background: var(--background);
-  color: var(--foreground);
+  background: rgb(var(--color-paper));
+  color: rgb(var(--color-ink));
   font-family:
     var(--font-body), ui-sans-serif, system-ui, -apple-system,
     BlinkMacSystemFont, "Segoe UI", sans-serif;
